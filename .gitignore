@@ -39,3 +39,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# prisma / db
+/prisma/*.db
+/prisma/*.db-journal
+/src/generated
+
+# uploads
+/public/uploads/*
+!/public/uploads/.gitkeep
+
+# Playwright persistent login profile + apply screenshots
+.browser-profile/
+public/uploads/screenshots/

@@ -1,0 +1,122 @@
+// JobPilot — agentic job finder (simulated agent, real LLM brain)
+// SQLite: arrays/objects stored as Json (text). No enums (use String).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Structured resume profile (single source of truth for the agent).
+model Profile {
+  id              String        @id @default(cuid())
+  isActive        Boolean       @default(true)
+  fullName        String        @default("")
+  title           String        @default("")
+  targetRole      String        @default("") // evaluated default search role (set on upload)
+  email           String        @default("")
+  phone           String        @default("")
+  summary         String        @default("")
+  yearsExperience Float         @default(0)
+  skills          Json          @default("[]") // string[]
+  tools           Json          @default("[]") // string[]
+  domains         Json          @default("[]") // string[]
+  roles           Json          @default("[]") // {title,company,years}[]
+  education       Json          @default("[]") // {degree,field,institution}[]
+  certifications  Json          @default("[]") // string[]
+  rawText         String        @default("")
+  confidence      Float         @default(0) // 0..1 extraction confidence
+  source          String        @default("heuristic") // "llm" | "heuristic"
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  files           ResumeFile[]
+  applications    Application[]
+}
+
+/// Uploaded PDF files tied to a profile.
+model ResumeFile {
+  id         String   @id @default(cuid())
+  name       String
+  path       String // public/uploads/...
+  size       Int
+  pages      Int      @default(0)
+  uploadedAt DateTime @default(now())
+  profile    Profile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  profileId  String?
+}
+
+/// Job portals the user targets.
+model Portal {
+  id        String   @id @default(cuid())
+  name      String   @unique // linkedin, indeed, glassdoor...
+  label     String
+  url       String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+/// Mock job pool the agent searches over (swap for a real adapter later).
+model Job {
+  id             String        @id @default(cuid())
+  portal         String // which portal it came from
+  externalId     String? // portal-native job id (real adapters); null for mock seeds
+  url            String? // direct apply/listing URL on the portal
+  company        String
+  position       String
+  location       String        @default("Remote")
+  remote         Boolean       @default(true)
+  seniority      String        @default("Mid") // Junior|Mid|Senior|Lead
+  jd             String // full job description
+  requiredSkills Json          @default("[]") // string[] must-have
+  niceSkills     Json          @default("[]") // string[] nice-to-have
+  yearsRequired  Float         @default(0)
+  salaryMin      Int?
+  salaryMax      Int?
+  applicantCount Int           @default(0)
+  easyApply      Boolean       @default(false) // on-site (automatable) apply
+  postedAt       DateTime      @default(now())
+  applications   Application[]
+
+  @@unique([portal, externalId])
+}
+
+/// Result of the agent evaluating + applying to a job.
+model Application {
+  id           String   @id @default(cuid())
+  job          Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  jobId        String
+  profile      Profile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  profileId    String?
+  status       String   @default("applied") // applied | matched | skipped
+  matchPct     Float    @default(0) // 0..100 deterministic
+  fitScore     Float    @default(0) // 0..100 composite shortlist estimate
+  matchedTerms Json     @default("[]") // string[] intersection
+  missingTerms Json     @default("[]") // string[] gaps (JD - resume)
+  suggestions  Json     @default("[]") // string[] grounded improvement wording
+  appliedAt    DateTime @default(now())
+
+  // --- real-apply execution state (Playwright) ---
+  applyState  String   @default("not_attempted") // not_attempted|dry_run|submitted|failed|needs_human|skipped_external
+  appliedVia  String   @default("agent") // agent|manual
+  applyError  String? // last failure reason
+  screenshots Json     @default("[]") // string[] step screenshot paths (audit trail)
+  attemptedAt DateTime?
+}
+
+/// Learning milestones derived from aggregated application gaps.
+model Milestone {
+  id          String    @id @default(cuid())
+  skill       String
+  category    String    @default("skill") // skill | tool | domain | certification
+  priority    Int       @default(0) // higher = more important
+  demandScore Float     @default(0) // 0..1 market demand
+  frequency   Int       @default(0) // times seen across applications
+  rationale   String    @default("")
+  done        Boolean   @default(false)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+}

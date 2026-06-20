@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand"><span class="dot"></span> JobPilot Co-pilot</div>
+      <button id="settingsBtn" class="icon" title="Settings">⚙</button>
+    </header>
+
+    <section id="settings" class="hidden card">
+      <label class="lbl">App URL</label>
+      <input id="apiBase" placeholder="http://localhost:3000" />
+      <button id="saveSettings" class="btn ghost sm">Save</button>
+    </section>
+
+    <section class="card">
+      <button id="scoreBtn" class="btn primary">Score this job</button>
+      <div id="scoreMeta" class="meta hidden"></div>
+      <div id="scoreResult" class="hidden">
+        <div class="ring-row">
+          <div class="ring"><svg viewBox="0 0 80 80"><circle class="track" cx="40" cy="40" r="34"/><circle id="ringArc" class="arc" cx="40" cy="40" r="34"/></svg><span id="matchPct">0%</span></div>
+          <div class="ring-detail">
+            <div><b id="fitScore">0</b><span>fit / shortlist est.</span></div>
+            <div><b id="matchedCount">0</b><span>skills matched</span></div>
+          </div>
+        </div>
+        <div class="group"><div class="lbl">Matched</div><div id="matched" class="chips"></div></div>
+        <div class="group"><div class="lbl">Missing (gaps)</div><div id="missing" class="chips warn"></div></div>
+        <div class="group"><div class="lbl">Suggestions</div><ul id="suggestions" class="tips"></ul></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="row-between">
+        <div class="lbl">Your details (autofill)</div>
+        <button id="loadProfile" class="btn ghost sm">Load from app</button>
+      </div>
+      <div class="grid">
+        <input id="f_firstName" placeholder="First name" />
+        <input id="f_lastName" placeholder="Last name" />
+        <input id="f_email" placeholder="Email" class="wide" />
+        <input id="f_phone" placeholder="Phone" />
+        <input id="f_location" placeholder="Location" />
+        <input id="f_linkedin" placeholder="LinkedIn URL" class="wide" />
+        <input id="f_github" placeholder="GitHub URL" class="wide" />
+        <input id="f_website" placeholder="Website" class="wide" />
+        <input id="f_title" placeholder="Current title" />
+        <input id="f_years" placeholder="Years exp" />
+      </div>
+      <button id="fillBtn" class="btn primary">Autofill this page</button>
+      <div id="fillResult" class="meta hidden"></div>
+      <p class="hint">Fills empty fields only. Review everything — <b>you</b> click submit.</p>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="panel.js"></script>
+  </body>
+</html>

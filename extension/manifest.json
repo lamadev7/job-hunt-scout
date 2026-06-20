@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "JobPilot Co-pilot",
+  "version": "0.1.0",
+  "description": "Score the job you're viewing against your resume, see gaps, and autofill the application — in your own browser session.",
+  "permissions": ["activeTab", "scripting", "sidePanel", "storage"],
+  "host_permissions": ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Open JobPilot Co-pilot" },
+  "side_panel": { "default_path": "panel.html" }
+}
