@@ -31,6 +31,10 @@ export type ApplicationItem = {
   missingTerms: string[];
   suggestions: string[];
   appliedAt: string;
+  applyState: string;
+  applyError: string | null;
+  screenshots: string[];
+  attemptedAt: string | null;
   job: {
     id: string;
     company: string;
@@ -40,6 +44,7 @@ export type ApplicationItem = {
     location: string;
     seniority: string;
     remote: boolean;
+    easyApply: boolean;
     yearsRequired: number;
     applicantCount: number;
     salaryMin: number | null;

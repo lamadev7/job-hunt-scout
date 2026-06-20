@@ -5,6 +5,7 @@ import { ensureDefaultPortals } from "@/lib/portals/bootstrap";
 import { scoreJob } from "@/lib/matching/engine";
 import { wordSuggestions } from "@/lib/llm/client";
 import { getActiveProfile, rowToStructured } from "@/lib/profile";
+import { getSettings } from "@/lib/settings";
 import { recomputeMilestones } from "./milestones";
 
 export type PostedWindow = "24h" | "2d" | "7d" | "30d" | "custom";
@@ -78,6 +79,7 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
     throw new Error("No active profile. Upload a resume first.");
   }
   const profile = rowToStructured(profileRow);
+  const settings = await getSettings();
 
   const query: SearchQuery = {
     portals: params.portals,
@@ -127,6 +129,12 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
     }
     summary.matched += 1;
 
+    // Auto-apply queueing (when enabled): queue jobs the agent can act on —
+    // every Easy-Apply match (it can auto-fill these), plus any perfect (100%)
+    // match (external ones resolve to "external" at apply time so you open them
+    // on the portal). The agent never submits during the scan.
+    const queued = settings.autoApplyEnabled && (job.easyApply || result.matchPct === 100);
+
     const suggestions = await wordSuggestions(result.missingTerms, job.position);
     await prisma.application.create({
       data: {
@@ -138,7 +146,7 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
         matchedTerms: result.matchedTerms,
         missingTerms: result.missingTerms,
         suggestions,
-        applyState: "not_attempted",
+        applyState: queued ? "queued" : "not_attempted",
       },
     });
 

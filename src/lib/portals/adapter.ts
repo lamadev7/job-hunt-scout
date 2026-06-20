@@ -42,6 +42,16 @@ export type ApplyOutcome = {
   screenshots: string[];
 };
 
+/** Applicant identity used to auto-fill apply forms (from the active profile). */
+export type ApplicantInfo = {
+  fullName: string;
+  email: string;
+  phone: string;
+  yearsExperience: number;
+};
+
+export type ApplyOpts = { resumePath: string | null; dryRun: boolean; applicant?: ApplicantInfo };
+
 /**
  * A portal source. fetchJobs returns jobs ALREADY persisted to the Job table
  * (so `.id` is a real FK target). applyJob is optional — only real adapters
@@ -50,7 +60,7 @@ export type ApplyOutcome = {
 export interface PortalAdapter {
   readonly name: string;
   fetchJobs(query: SearchQuery, hooks?: FetchHooks): Promise<JobRecord[]>;
-  applyJob?(job: JobRecord, opts: { resumePath: string | null; dryRun: boolean }): Promise<ApplyOutcome>;
+  applyJob?(job: JobRecord, opts: ApplyOpts): Promise<ApplyOutcome>;
   /** Real adapters report whether the persistent session is authenticated. */
   isLoggedIn?(): Promise<boolean>;
   /** Open a headed window so the user can log in once. */
@@ -119,6 +129,17 @@ const ROLE_STOPWORDS = new Set([
 
 export const mockPortalAdapter: PortalAdapter = {
   name: "mock",
+  /**
+   * Simulated apply for demo/non-real portals. Honors the same contract as real
+   * adapters so the full queue → apply → status pipeline is end-to-end testable
+   * without a browser: external posts are skipped, dry-runs report dry_run, and
+   * applicable posts report submitted.
+   */
+  async applyJob(job, { dryRun }) {
+    if (!job.easyApply) return { state: "skipped_external", screenshots: [] };
+    if (dryRun) return { state: "dry_run", screenshots: [] };
+    return { state: "submitted", screenshots: [] };
+  },
   async fetchJobs(query, hooks) {
     await ensureMockPool(query.portals);
 

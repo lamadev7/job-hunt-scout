@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 
@@ -86,6 +88,22 @@ export function isLaunched(): boolean {
 export function hasProfile(): boolean {
   // Presence of the dir is enough; per-portal auth is checked by each adapter.
   return existsSync(PROFILE_DIR);
+}
+
+const SHOTS_DIR = path.join(process.cwd(), "public", "uploads", "screenshots");
+
+/** Capture a step screenshot for the apply audit trail. Returns a public path
+ *  (under /uploads/screenshots) or "" if capture failed. Never throws. */
+export async function screenshot(page: Page, label: string): Promise<string> {
+  try {
+    await mkdir(SHOTS_DIR, { recursive: true });
+    const safe = label.replace(/[^\w-]+/g, "_");
+    const rel = `/uploads/screenshots/${Date.now()}-${safe}-${randomUUID().slice(0, 8)}.png`;
+    await page.screenshot({ path: path.join(process.cwd(), "public", rel.slice(1)) });
+    return rel;
+  } catch {
+    return "";
+  }
 }
 
 export async function closeBrowser(): Promise<void> {

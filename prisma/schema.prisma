@@ -120,3 +120,12 @@ model Milestone {
   completedAt DateTime?
   createdAt   DateTime  @default(now())
 }
+
+/// Singleton app configuration (auto-apply settings).
+model AppSetting {
+  id               String   @id @default("singleton")
+  autoApplyEnabled Boolean  @default(false)
+  dailyCap         Int      @default(10)
+  dryRunFirst      Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+}

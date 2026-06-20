@@ -9,11 +9,13 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status"); // applied | matched | all
+  const applyState = searchParams.get("applyState"); // queued | submitted | ...
   const q = searchParams.get("q")?.trim();
 
   const apps = await prisma.application.findMany({
     where: {
       ...(status && status !== "all" ? { status } : {}),
+      ...(applyState ? { applyState } : {}),
       ...(q
         ? {
             job: {
@@ -39,6 +41,10 @@ export async function GET(req: Request) {
     missingTerms: asArray<string>(a.missingTerms),
     suggestions: asArray<string>(a.suggestions),
     appliedAt: a.appliedAt,
+    applyState: a.applyState,
+    applyError: a.applyError,
+    screenshots: asArray<string>(a.screenshots),
+    attemptedAt: a.attemptedAt,
     job: {
       id: a.job.id,
       company: a.job.company,
@@ -48,6 +54,7 @@ export async function GET(req: Request) {
       location: a.job.location,
       seniority: a.job.seniority,
       remote: a.job.remote,
+      easyApply: a.job.easyApply,
       yearsRequired: a.job.yearsRequired,
       applicantCount: a.job.applicantCount,
       salaryMin: a.job.salaryMin,

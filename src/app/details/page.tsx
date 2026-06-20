@@ -7,6 +7,7 @@ import { Card, PageHeader, Badge, Skeleton } from "@/components/ui/primitives";
 import { ResumeUpload } from "@/components/details/ResumeUpload";
 import { PortalManager } from "@/components/details/PortalManager";
 import { ProfileEditor } from "@/components/details/ProfileEditor";
+import { AutoApplyCard } from "@/components/details/AutoApplyCard";
 
 export default function DetailsPage() {
   const { data, isLoading } = useQuery({
@@ -45,6 +46,8 @@ export default function DetailsPage() {
           </Card>
 
           <PortalManager />
+
+          <AutoApplyCard />
         </div>
 
         <div className="space-y-6">

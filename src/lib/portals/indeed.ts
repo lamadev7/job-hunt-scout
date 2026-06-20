@@ -1,8 +1,8 @@
 import type { Page } from "playwright";
 import { prisma } from "@/lib/db";
 import { extractJobSkills } from "@/lib/matching/jd";
-import { getPage, isLaunched } from "./browser";
-import type { FetchHooks, JobRecord, PortalAdapter, SearchQuery } from "./adapter";
+import { getPage, isLaunched, screenshot } from "./browser";
+import type { ApplyOpts, ApplyOutcome, FetchHooks, JobRecord, PortalAdapter, SearchQuery } from "./adapter";
 
 /**
  * Real Indeed adapter — opens a headed browser, searches Remote jobs from the
@@ -238,9 +238,55 @@ async function fetchJobs(query: SearchQuery, hooks?: FetchHooks): Promise<JobRec
   return out;
 }
 
+/**
+ * Indeed Apply is multi-step + screening-question heavy and varies per employer,
+ * so we never auto-submit it. We open the on-site apply flow (so the resume +
+ * fields are pre-filled by Indeed where possible) and hand off to the user.
+ * Dry-run just confirms an on-site Apply button exists.
+ */
+async function applyJob(job: JobRecord, { dryRun }: ApplyOpts): Promise<ApplyOutcome> {
+  const page = await getPage("indeed");
+  const shots: string[] = [];
+  const push = async (label: string) => {
+    const s = await screenshot(page, `indeed-${label}`);
+    if (s) shots.push(s);
+  };
+
+  try {
+    const url = job.url ?? `${VIEW_BASE}?jk=${job.externalId}`;
+    await page.bringToFront().catch(() => {});
+    await page.goto(url, { waitUntil: "commit", timeout: 30_000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+
+    const applyBtn = page
+      .locator("#indeedApplyButton, .indeed-apply-button, button:has-text('Apply now'), a:has-text('Apply now')")
+      .first();
+    if (!(await applyBtn.count())) {
+      await push("no-apply");
+      return { state: "skipped_external", error: "No on-site Apply — apply on the employer site.", screenshots: shots };
+    }
+    if (dryRun) {
+      await push("dry-run-ready");
+      return { state: "dry_run", screenshots: shots };
+    }
+    await applyBtn.click({ timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+    await push("apply-opened");
+    return {
+      state: "needs_human",
+      error: "Indeed Apply opened — review the pre-filled form and submit in the window.",
+      screenshots: shots,
+    };
+  } catch (err) {
+    await push("error");
+    return { state: "failed", error: err instanceof Error ? err.message : "Apply failed.", screenshots: shots };
+  }
+}
+
 export const indeedAdapter: PortalAdapter = {
   name: "indeed",
   fetchJobs,
+  applyJob,
   isLoggedIn,
   openLogin,
 };
