@@ -1,3 +1,5 @@
+<img width="1512" height="824" alt="Screenshot 2026-06-20 at 19 14 18" src="https://github.com/user-attachments/assets/888e4071-6077-4fa7-91e7-6bbff70b0756" />
+
 # Job Apply Scout
 
 An AI job-hunt agent that reads your resume, scans real job portals in a live browser, and ranks every posting against your skills with **deterministic, traceable matching** — so you get a focused shortlist instead of a wall of listings. It finds and scores jobs; it never auto-applies on your behalf.
