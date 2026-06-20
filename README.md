@@ -4,6 +4,8 @@
 
 An AI job-hunt agent that reads your resume, scans real job portals in a live browser, and ranks every posting against your skills with **deterministic, traceable matching** — so you get a focused shortlist instead of a wall of listings. It finds and scores jobs; it never auto-applies on your behalf.
 
+> 🏗️ Engineering deep-dive (architecture diagrams, agentic loop, data model, code map): **[ARCHITECTURE.md](./ARCHITECTURE.md)**
+
 ---
 
 ## The Problem
