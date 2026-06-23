@@ -17,6 +17,33 @@ const W = {
   applicants: 0.15,
 };
 
+// Experience-fit tuning. Years on the job is a primary screen in most hiring
+// funnels, so a real shortfall must pull the headline match down — not just the
+// soft fit estimate.
+//   - meet or exceed the ask          => full credit
+//   - stretch up to TOLERANCE under   => still full credit (4y candidate vs a
+//                                        5y ask is realistic, recruiters accept it)
+//   - beyond that                     => linear decay; each extra year of gap
+//                                        past tolerance costs 1/DECAY of the score
+const YEARS_TOLERANCE = 1;
+const YEARS_DECAY = 3;
+
+/**
+ * Deterministic experience fit (0..1). `meets` is the human verdict used for the
+ * "matching / not matching" criteria; `fit` is the multiplier applied to the
+ * match score. Over-qualification is never penalized.
+ */
+export function experienceFit(
+  have: number,
+  required: number
+): { fit: number; meets: boolean; gap: number } {
+  if (!required || required <= 0) return { fit: 1, meets: true, gap: 0 };
+  const gap = required - have; // positive => under-qualified
+  if (gap <= YEARS_TOLERANCE) return { fit: 1, meets: true, gap: Math.max(0, gap) };
+  const fit = clamp(1 - (gap - YEARS_TOLERANCE) / YEARS_DECAY, 0, 1);
+  return { fit, meets: false, gap };
+}
+
 /**
  * Deterministic match scoring. The LLM never produces these numbers — they are
  * computed from set intersections so every percentage is provable + traceable.
@@ -48,15 +75,15 @@ export function scoreJob(profile: StructuredProfile, job: JobLike): MatchResult 
 
   const mustHaveCoverage = reqCov ?? 0;
   const niceHaveCoverage = niceCov ?? 0;
-  const matchPct = clamp(Math.round(skillScore * 100));
 
-  // Years closeness: full credit at/above required, linear penalty below.
-  const yearsMatch =
-    job.yearsRequired <= 0
-      ? 1
-      : clamp(profile.yearsExperience / job.yearsRequired, 0, 1.2) > 1
-        ? 1
-        : clamp(profile.yearsExperience / job.yearsRequired, 0, 1);
+  // Experience fit folds into the headline match — a strong skill match for a
+  // role that wants years you don't have is NOT a 100% match. Tolerance-aware so
+  // a realistic stretch isn't punished.
+  const exp = experienceFit(profile.yearsExperience, job.yearsRequired);
+  const yearsMatch = exp.fit;
+
+  // Match % = skill coverage tempered by experience fit. Zero skills => still 0.
+  const matchPct = clamp(Math.round(skillScore * exp.fit * 100));
 
   // Fewer applicants -> higher odds. Normalize against a 600 ceiling.
   const applicantFactor = clamp(1 - job.applicantCount / 600, 0, 1);
@@ -77,6 +104,15 @@ export function scoreJob(profile: StructuredProfile, job: JobLike): MatchResult 
     fitScore,
     matchedTerms: dedupe(matchedTerms),
     missingTerms: dedupe(missingTerms),
+    experience:
+      job.yearsRequired > 0
+        ? {
+            required: job.yearsRequired,
+            have: profile.yearsExperience,
+            meets: exp.meets,
+            fit: exp.fit,
+          }
+        : null,
     breakdown: { mustHaveCoverage, niceHaveCoverage, yearsMatch, applicantFactor },
   };
 }

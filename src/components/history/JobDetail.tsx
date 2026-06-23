@@ -16,6 +16,7 @@ import {
   Target,
 } from "lucide-react";
 import { Card, Badge, ProgressRing, ProgressBar, Button } from "@/components/ui/primitives";
+import { experienceFit } from "@/lib/matching/engine";
 import type { ApplicationItem } from "@/lib/api";
 
 function salaryLabel(min: number | null, max: number | null): string | null {
@@ -44,6 +45,14 @@ function Stat({ icon: Icon, children }: { icon: typeof MapPin; children: React.R
 export function JobDetail({ app, onBack }: { app: ApplicationItem; onBack: () => void }) {
   const { job } = app;
   const salary = salaryLabel(job.salaryMin, job.salaryMax);
+
+  // Experience is a first-class criterion alongside skills. Computed live from
+  // the job's ask vs the profile's years so it stays accurate even for older
+  // saved matches. Kept out of the skill term lists by design.
+  const exp = job.yearsRequired > 0 ? experienceFit(app.profileYears, job.yearsRequired) : null;
+  const expLabel = exp ? `Experience: ${job.yearsRequired}+ yrs` : null;
+  const matchCount = app.matchedTerms.length + (exp?.meets ? 1 : 0);
+  const missCount = app.missingTerms.length + (exp && !exp.meets ? 1 : 0);
 
   return (
     <div className="animate-fade-up space-y-4">
@@ -122,10 +131,15 @@ export function JobDetail({ app, onBack }: { app: ApplicationItem; onBack: () =>
       {/* matching criteria */}
       <Card className="p-5">
         <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-success">
-          <CheckCircle2 size={16} /> Matching criteria ({app.matchedTerms.length})
+          <CheckCircle2 size={16} /> Matching criteria ({matchCount})
         </div>
-        {app.matchedTerms.length ? (
+        {matchCount ? (
           <div className="flex flex-wrap gap-1.5">
+            {exp?.meets && (
+              <Badge tone="success">
+                {expLabel} {app.profileYears >= job.yearsRequired ? "✓" : `· you have ${app.profileYears}`}
+              </Badge>
+            )}
             {app.matchedTerms.map((t) => (
               <Badge key={t} tone="success">{t}</Badge>
             ))}
@@ -138,10 +152,13 @@ export function JobDetail({ app, onBack }: { app: ApplicationItem; onBack: () =>
       {/* not matching */}
       <Card className="p-5">
         <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-danger">
-          <XCircle size={16} /> Not matching ({app.missingTerms.length})
+          <XCircle size={16} /> Not matching ({missCount})
         </div>
-        {app.missingTerms.length ? (
+        {missCount ? (
           <div className="flex flex-wrap gap-1.5">
+            {exp && !exp.meets && (
+              <Badge tone="warn">{expLabel} · you have {app.profileYears}</Badge>
+            )}
             {app.missingTerms.map((t) => (
               <Badge key={t} tone="warn">{t}</Badge>
             ))}

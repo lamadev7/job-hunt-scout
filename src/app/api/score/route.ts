@@ -63,6 +63,7 @@ export async function POST(req: Request) {
       fitScore: result.fitScore,
       matchedTerms: result.matchedTerms,
       missingTerms: result.missingTerms,
+      experience: result.experience,
       requiredSkills: required,
       niceSkills: nice,
       suggestions,

@@ -2,6 +2,7 @@
 
 import { Building2, MapPin, Users, Lightbulb, ExternalLink } from "lucide-react";
 import { Card, Badge, ProgressRing, ProgressBar } from "@/components/ui/primitives";
+import { experienceFit } from "@/lib/matching/engine";
 import type { ApplicationItem } from "@/lib/api";
 
 export function JobCard({
@@ -14,6 +15,8 @@ export function JobCard({
   selected?: boolean;
 }) {
   const { job } = app;
+  const exp = job.yearsRequired > 0 ? experienceFit(app.profileYears, job.yearsRequired) : null;
+  const expShort = exp && !exp.meets;
   return (
     <Card
       onClick={onSelect ? () => onSelect(app) : undefined}
@@ -83,12 +86,15 @@ export function JobCard({
         <ProgressBar value={app.fitScore} />
       </div>
 
-      {app.missingTerms.length > 0 && (
+      {(app.missingTerms.length > 0 || expShort) && (
         <div className="mt-4 rounded-xl bg-warn-soft/60 p-3">
           <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-warn">
-            <Lightbulb size={14} /> To reach 100% match, add:
+            <Lightbulb size={14} /> {expShort ? "Gaps to close:" : "To reach 100% match, add:"}
           </div>
           <div className="flex flex-wrap gap-1.5">
+            {expShort && (
+              <Badge tone="warn">Experience: {job.yearsRequired}+ yrs · you have {app.profileYears}</Badge>
+            )}
             {app.missingTerms.map((t) => (
               <Badge key={t} tone="warn">{t}</Badge>
             ))}

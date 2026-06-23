@@ -33,6 +33,9 @@ export type MatchResult = {
   fitScore: number; // 0..100 — composite shortlist estimate
   matchedTerms: string[];
   missingTerms: string[];
+  // Experience criterion (null when the JD states no requirement). Kept separate
+  // from missingTerms so it never leaks into skill-learning milestones.
+  experience: { required: number; have: number; meets: boolean; fit: number } | null;
   breakdown: {
     mustHaveCoverage: number; // 0..1
     niceHaveCoverage: number; // 0..1

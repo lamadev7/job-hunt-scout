@@ -27,7 +27,7 @@ export async function GET(req: Request) {
           }
         : {}),
     },
-    include: { job: true },
+    include: { job: true, profile: { select: { yearsExperience: true } } },
     orderBy: { appliedAt: "desc" },
     take: 50, // cap search results
   });
@@ -45,6 +45,7 @@ export async function GET(req: Request) {
     applyError: a.applyError,
     screenshots: asArray<string>(a.screenshots),
     attemptedAt: a.attemptedAt,
+    profileYears: a.profile?.yearsExperience ?? 0,
     job: {
       id: a.job.id,
       company: a.job.company,

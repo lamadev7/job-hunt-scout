@@ -35,6 +35,7 @@ export type ApplicationItem = {
   applyError: string | null;
   screenshots: string[];
   attemptedAt: string | null;
+  profileYears: number;
   job: {
     id: string;
     company: string;
