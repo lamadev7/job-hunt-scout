@@ -39,6 +39,14 @@ async function launch(): Promise<BrowserContext> {
     globalForBrowser.__portalLaunch = undefined;
     globalForBrowser.__portalPages = undefined;
   });
+  // Bundlers (esbuild/tsx with keepNames) wrap functions in a `__name(fn, ...)`
+  // helper. When such a function is shipped to page.evaluate the helper isn't
+  // defined in the browser → "ReferenceError: __name is not defined". Define a
+  // harmless identity shim on every document so any evaluated function runs.
+  await ctx.addInitScript(() => {
+    // @ts-expect-error — define the helper the bundler may reference in-page
+    if (typeof window.__name === "undefined") window.__name = (fn: unknown) => fn;
+  });
   return ctx;
 }
 
