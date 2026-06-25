@@ -97,7 +97,11 @@ export async function learnRecipe(
   const profile = await profileResultsPage(page).catch(() => null);
   if (!profile || profile.anchors.length === 0) return null;
 
-  const draft = coerceRecipeDraft(await askJson(buildPrompt(portal, baseUrl, profile)));
+  // The LLM (esp. the CLI tier with no API key) can return nothing parseable on
+  // a first try; one retry makes learning reliable without being expensive.
+  const prompt = buildPrompt(portal, baseUrl, profile);
+  let draft = coerceRecipeDraft(await askJson(prompt));
+  if (!draft) draft = coerceRecipeDraft(await askJson(prompt));
   if (!draft) return null;
 
   // ---- validate on a live sample (try the templated URL, then the base) ----

@@ -22,6 +22,9 @@ const MIN_JD = 120;
 
 /** Generic job-link heuristic for the blind fallback (no recipe). */
 const JOB_LINK_RE = /(\/job[s]?\/|\/viewjob|\/vacanc|\/career|\/position|\/opening|[?&](jk|gh_jid|jobid|job_id)=)/i;
+/** Non-job pages that the loose blind regex tends to catch — drop them. */
+const BLIND_EXCLUDE_RE =
+  /(\/(faq|privacy|terms|cookies?|login|sign[-_]?in|sign[-_]?up|register|about|contact|blog|news|help|support|life-at|culture|benefits|internship-programs|candidate-privacy|career-services|teams?)(\/|$|#|\?))|\/positions\/?($|#|\?)|\/careers?\/?($|#|\?)/i;
 const NO_SELECTORS: DetailSelectors = { title: "", company: "", jd: "", posted: "" };
 
 // Per-portal "connected" flag — opened once via Connect. Cleared implicitly when
@@ -154,12 +157,13 @@ export function makeGenericAdapter(name: string): PortalAdapter {
     selectors: DetailSelectors,
     origin: string,
     query: SearchQuery,
-    hooks?: FetchHooks
+    hooks?: FetchHooks,
+    exclude?: RegExp
   ): Promise<JobRecord[]> {
     await page.goto(searchUrl, { waitUntil: "commit", timeout: 45_000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
-    const urls = await harvestJobLinks(page, linkRegex, MAX_JOBS, 8);
+    const urls = await harvestJobLinks(page, linkRegex, MAX_JOBS, 8, exclude);
     if (!urls.length) return [];
 
     hooks?.onStatus?.(`Found ${urls.length} listings on ${name}. Reading each…`);
@@ -237,7 +241,7 @@ export function makeGenericAdapter(name: string): PortalAdapter {
 
     // 3) Guaranteed-safe blind heuristic scan (no recipe / learning unavailable).
     hooks?.onStatus?.(`Scanning ${name} (generic mode)…`);
-    const out = await scan(page, base, JOB_LINK_RE.source, NO_SELECTORS, origin, query, hooks);
+    const out = await scan(page, base, JOB_LINK_RE.source, NO_SELECTORS, origin, query, hooks, BLIND_EXCLUDE_RE);
     if (out.length) return out;
 
     throw new Error(

@@ -21,35 +21,51 @@ export type DetailSelectors = {
   posted: string;
 };
 
+/** Canonical key for dedupe: drop the #fragment and any trailing slash, lowercase.
+ *  So "/positions/", "/positions", and "/positions/#main" collapse to one. */
+function canonicalKey(href: string): string {
+  return href.replace(/#.*$/, "").replace(/\/+$/, "").toLowerCase();
+}
+
 /**
  * Scroll the results page, collecting absolute hrefs that match `regexSource`.
- * Stops at `max` links or `rounds` scrolls. Dedupes, preserves first-seen order.
+ * Stops at `max` links or `rounds` scrolls. Dedupes by canonical key (so the same
+ * page linked under different #fragments isn't scraped repeatedly), preserves
+ * first-seen order, and skips any href matching `exclude` (used by the blind
+ * fallback to drop nav/footer pages like FAQ / privacy / login).
  */
 export async function harvestJobLinks(
   page: Page,
   regexSource: string,
   max: number,
-  rounds: number
+  rounds: number,
+  exclude?: RegExp
 ): Promise<string[]> {
-  const links = new Set<string>();
-  for (let s = 0; s < rounds && links.size < max; s++) {
+  let re: RegExp;
+  try {
+    re = new RegExp(regexSource, "i");
+  } catch {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (let s = 0; s < rounds && out.length < max; s++) {
     const hrefs = await page
       .$$eval("a[href]", (els) => els.map((e) => (e as HTMLAnchorElement).href))
       .catch(() => [] as string[]);
-    let re: RegExp;
-    try {
-      re = new RegExp(regexSource, "i");
-    } catch {
-      return [];
-    }
     for (const h of hrefs) {
-      if (h && re.test(h)) links.add(h);
-      if (links.size >= max) break;
+      if (!h || !re.test(h)) continue;
+      if (exclude && exclude.test(h)) continue;
+      const key = canonicalKey(h);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(h);
+      if (out.length >= max) break;
     }
     await page.mouse.wheel(0, 2400).catch(() => {});
     await page.waitForTimeout(1200);
   }
-  return Array.from(links).slice(0, max);
+  return out.slice(0, max);
 }
 
 /**
