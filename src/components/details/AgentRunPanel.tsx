@@ -87,7 +87,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
       } else if (s.errors.length > 0) {
         toast.error(s.errors[0]);
       } else {
-        toast.info("No jobs found to scan. Connect LinkedIn (or check your sign-in) and try again.");
+        toast.info("No jobs found to scan. Connect your portals (or check your sign-in) and try again.");
       }
       qc.invalidateQueries({ queryKey: ["analytics"] });
       qc.invalidateQueries({ queryKey: ["applications"] });

@@ -121,6 +121,31 @@ model Milestone {
   createdAt   DateTime  @default(now())
 }
 
+/// A LEARNED scraping recipe for a portal that has no hand-tuned adapter.
+/// The agent discovers this once (LLM + live DOM), validates it, and replays it
+/// on later runs — so new portals need no hardcoded code. Self-heals: a recipe
+/// that stops returning jobs is marked `failed` and re-learned on the next run.
+model PortalRecipe {
+  id                String   @id @default(cuid())
+  portal            String   @unique // matches Portal.name
+  // Search URL with placeholders: {role} {location} {sinceDays} {remote}.
+  // null/empty => just load the portal's base url (filter client-side).
+  searchUrlTemplate String   @default("")
+  // Regex (JS source, case-insensitive) matched against each absolute anchor
+  // href to pick job-listing links on the results page.
+  jobLinkRegex      String
+  // CSS selectors for the detail page. "" => fall back to heuristic for that field.
+  titleSelector     String   @default("")
+  companySelector   String   @default("")
+  jdSelector        String   @default("")
+  postedSelector    String   @default("")
+  confidence        Float    @default(0) // 0..1 (validated on a sample job)
+  status            String   @default("active") // active | failed
+  sampleJobUrl      String   @default("")
+  learnedAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
 /// Singleton app configuration (auto-apply settings).
 model AppSetting {
   id               String   @id @default("singleton")

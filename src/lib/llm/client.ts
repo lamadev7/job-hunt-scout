@@ -186,6 +186,34 @@ function finalize(
 }
 
 /**
+ * Generic "return JSON" call used by the portal-recipe learner. Same two-tier
+ * strategy as extraction (Anthropic API, then local Claude CLI). Returns the
+ * first parsed JSON value, or null if no LLM is available / it produced nothing
+ * parseable. Never throws.
+ */
+export async function askJson(prompt: string, maxTokens = 1500): Promise<unknown | null> {
+  if (client) {
+    try {
+      const res = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }],
+      });
+      const textBlock = res.content.find((b) => b.type === "text");
+      if (textBlock && textBlock.type === "text") {
+        const m = textBlock.text.match(/\{[\s\S]*\}/);
+        if (m) return JSON.parse(m[0]);
+      }
+    } catch (err) {
+      console.error("[llm] askJson API failed, trying CLI:", err);
+    }
+  }
+  // Tier 2 — local Claude CLI (extractViaCli already extracts the first JSON object).
+  return extractViaCli(prompt);
+}
+
+/**
  * Turn a list of missing skills into short, grounded improvement suggestions.
  * LLM only does the WORDING; the skill list itself is computed by the matcher.
  */
