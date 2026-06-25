@@ -98,10 +98,13 @@ export async function learnRecipe(
   if (!profile || profile.anchors.length === 0) return null;
 
   // The LLM (esp. the CLI tier with no API key) can return nothing parseable on
-  // a first try; one retry makes learning reliable without being expensive.
+  // a cold first call; a few retries make learning reliable without real cost
+  // (learning happens once per portal, then the recipe is replayed from disk).
   const prompt = buildPrompt(portal, baseUrl, profile);
-  let draft = coerceRecipeDraft(await askJson(prompt));
-  if (!draft) draft = coerceRecipeDraft(await askJson(prompt));
+  let draft = null as ReturnType<typeof coerceRecipeDraft>;
+  for (let attempt = 0; attempt < 3 && !draft; attempt++) {
+    draft = coerceRecipeDraft(await askJson(prompt));
+  }
   if (!draft) return null;
 
   // ---- validate on a live sample (try the templated URL, then the base) ----
