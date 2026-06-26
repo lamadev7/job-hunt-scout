@@ -9,8 +9,12 @@ import { VOCAB } from "./vocab";
  * "nice-to-have" terms are those that appear under a bonus/plus/preferred
  * heading; everything else detected is treated as required.
  */
+// A REAL "nice to have" section heading — anchored to a line/bullet start so an
+// inline word like "C# / .NET preferred" inside a Required-Skills list does NOT
+// demote the rest of the JD to optional. Must look like a heading, optionally
+// followed by a colon.
 const NICE_HEADING =
-  /(nice[\s-]?to[\s-]?have|bonus|plus(?:es)?|preferred|good to have|a plus)/i;
+  /(?:^|\n)\s*(?:[-*•]\s*)?(?:nice[\s-]?to[\s-]?haves?|bonus(?:\s+points)?|good[\s-]to[\s-]have|preferred\s+qualifications|preferred\s+skills|pluses)\s*:?/im;
 
 export function extractJobSkills(jd: string): { required: string[]; nice: string[] } {
   const text = jd.toLowerCase();
@@ -44,9 +48,25 @@ export function extractJobSkills(jd: string): { required: string[]; nice: string
 
 function isWholeTerm(text: string, idx: number, len: number): boolean {
   const before = idx === 0 ? " " : text[idx - 1];
-  const after = idx + len >= text.length ? " " : text[idx + len];
-  const boundary = (c: string) => !/[a-z0-9.+#]/i.test(c);
-  return boundary(before) && boundary(after);
+  // "." counts as part of the token before (so "asp.net" doesn't yield "net"),
+  const beforeOk = !/[a-z0-9.+#]/i.test(before);
+  return beforeOk && afterIsBoundary(text, idx + len);
+}
+
+/**
+ * Is the position after a term a word boundary? A "." only belongs to the term
+ * when followed by another word char ("node.js", "asp.net") — a trailing dot
+ * ("We use Kotlin.") is a boundary, so end-of-sentence skills still match.
+ */
+function afterIsBoundary(text: string, pos: number): boolean {
+  if (pos >= text.length) return true;
+  const c = text[pos];
+  if (/[a-z0-9+#]/i.test(c)) return false;
+  if (c === ".") {
+    const next = text[pos + 1];
+    return !next || !/[a-z0-9+#]/i.test(next);
+  }
+  return true;
 }
 
 function findBounded(text: string, needle: string): number {

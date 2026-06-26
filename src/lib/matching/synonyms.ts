@@ -45,6 +45,42 @@ const ALIASES: Record<string, string> = {
   ml: "machine learning",
   "scikit learn": "scikit-learn",
   sklearn: "scikit-learn",
+  // .NET / Microsoft ecosystem
+  "c sharp": "c#",
+  csharp: "c#",
+  "c-sharp": "c#",
+  dotnet: ".net",
+  "dot net": ".net",
+  ".net core": ".net",
+  ".net framework": ".net",
+  "asp.net": "asp.net core",
+  "asp net": "asp.net core",
+  aspnet: "asp.net core",
+  "asp.net core": "asp.net core",
+  "entity framework core": "entity framework",
+  "ef core": "entity framework",
+  "azure devops": "azure devops",
+  "microsoft azure": "azure",
+  // frameworks / langs
+  "vue.js": "vue",
+  vuejs: "vue",
+  angularjs: "angular",
+  "ruby on rails": "ruby on rails",
+  rails: "ruby on rails",
+  ror: "ruby on rails",
+  "react native": "react native",
+  reactnative: "react native",
+  "spring boot": "spring",
+  // AI / agents
+  llms: "llm",
+  "large language model": "llm",
+  "large language models": "llm",
+  rag: "rag",
+  "retrieval augmented generation": "rag",
+  "retrieval-augmented generation": "rag",
+  mcp: "mcp",
+  "model context protocol": "mcp",
+  "natural language processing": "nlp",
 };
 
 export function canonical(skill: string): string {
@@ -64,9 +100,18 @@ const VOCAB_TERMS = VOCAB.map((v) => ({ needle: v.name.toLowerCase(), canon: can
 
 function isWholeTerm(text: string, idx: number, len: number): boolean {
   const before = idx === 0 ? " " : text[idx - 1];
-  const after = idx + len >= text.length ? " " : text[idx + len];
-  const boundary = (c: string) => !/[a-z0-9.+#]/i.test(c);
-  return boundary(before) && boundary(after);
+  const beforeOk = !/[a-z0-9.+#]/i.test(before);
+  if (!beforeOk) return false;
+  // A trailing "." is a boundary unless it joins another word char (node.js).
+  const pos = idx + len;
+  if (pos >= text.length) return true;
+  const c = text[pos];
+  if (/[a-z0-9+#]/i.test(c)) return false;
+  if (c === ".") {
+    const next = text[pos + 1];
+    return !next || !/[a-z0-9+#]/i.test(next);
+  }
+  return true;
 }
 
 /**
