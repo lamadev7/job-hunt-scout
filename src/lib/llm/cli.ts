@@ -57,10 +57,14 @@ export async function extractViaCli(prompt: string): Promise<unknown | null> {
   const bin = await resolveCli();
   if (!bin) return null;
   try {
+    // Pass the prompt on STDIN, not as an argv arg. A large prompt as an argument
+    // makes `claude -p` wait on (empty) stdin and get killed ("no stdin data
+    // received"), and can blow the arg-length limit. Piping via stdin is the
+    // documented print-mode path and is reliable for large prompts.
     const { stdout } = await pExecFile(
       bin,
-      ["-p", prompt, "--output-format", "json"],
-      { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }
+      ["-p", "--output-format", "json"],
+      { input: prompt, timeout: 180_000, maxBuffer: 10 * 1024 * 1024 }
     );
     // Print-mode JSON wrapper: { type, result, ... }. result holds the text.
     let text = stdout;
