@@ -3,6 +3,7 @@ import type { JobRecord, SearchQuery } from "@/lib/portals/adapter";
 import { getAdapterFor } from "@/lib/portals/registry";
 import { ensureDefaultPortals } from "@/lib/portals/bootstrap";
 import { scoreJob } from "@/lib/matching/engine";
+import { judgeMatch } from "@/lib/matching/llm-judge";
 import { wordSuggestions } from "@/lib/llm/client";
 import { getActiveProfile, rowToStructured } from "@/lib/profile";
 import { getSettings } from "@/lib/settings";
@@ -122,9 +123,23 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
     summary.evaluated += 1;
 
     const result = scoreJob(profile, job);
-    if (result.matchPct < params.threshold) {
+
+    // The deterministic engine is provable but LITERAL: it scores skill overlap
+    // and a years regex, but can't read "U.S. citizenship required" as a hard
+    // blocker or tell a required certification from merely using the tech. So a
+    // job whose skills all overlap can score 100% even when the candidate is
+    // disqualified. For jobs that PASS the bar, run the LLM judge on the full JD
+    // to catch those blockers and demote (the judge caps blocked jobs <=30).
+    // Judging only the high scorers — not every scanned job — keeps cost bounded.
+    let matchPct = result.matchPct;
+    if (matchPct >= params.threshold) {
+      const judged = await judgeMatch(profile, job.jd, job.position);
+      if (judged) matchPct = judged.matchPct;
+    }
+
+    if (matchPct < params.threshold) {
       summary.skipped += 1;
-      emit({ type: "skip", position: job.position, matchPct: result.matchPct });
+      emit({ type: "skip", position: job.position, matchPct });
       return;
     }
     summary.matched += 1;
@@ -133,7 +148,7 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
     // every Easy-Apply match (it can auto-fill these), plus any perfect (100%)
     // match (external ones resolve to "external" at apply time so you open them
     // on the portal). The agent never submits during the scan.
-    const queued = settings.autoApplyEnabled && (job.easyApply || result.matchPct === 100);
+    const queued = settings.autoApplyEnabled && (job.easyApply || matchPct === 100);
 
     const suggestions = await wordSuggestions(result.missingTerms, job.position);
     await prisma.application.create({
@@ -141,7 +156,7 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
         jobId: job.id,
         profileId: profileRow.id,
         status: "matched", // saved to history, NOT applied
-        matchPct: result.matchPct,
+        matchPct,
         fitScore: result.fitScore,
         matchedTerms: result.matchedTerms,
         missingTerms: result.missingTerms,
@@ -150,14 +165,14 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
       },
     });
 
-    summary.topMatches.push({ company: job.company, position: job.position, matchPct: result.matchPct });
+    summary.topMatches.push({ company: job.company, position: job.position, matchPct });
     emit({
       type: "match",
       match: {
         company: job.company,
         position: job.position,
         postedAt: job.postedAt,
-        matchPct: result.matchPct,
+        matchPct,
         url: job.url,
       },
     });
