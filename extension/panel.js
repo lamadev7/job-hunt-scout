@@ -79,6 +79,17 @@ function renderScore(d) {
   $("ringArc").style.strokeDashoffset = String(214 - (214 * d.matchPct) / 100);
   $("fitScore").textContent = d.fitScore;
   $("matchedCount").textContent = (d.matchedTerms || []).length;
+
+  // Verdict + hard blockers (LLM-scored runs only).
+  const v = $("verdict");
+  if (d.verdict) { v.textContent = d.verdict; v.classList.remove("hidden"); }
+  else v.classList.add("hidden");
+  const bg = $("blockersGroup"); const b = $("blockers"); b.innerHTML = "";
+  if (d.blockers && d.blockers.length) {
+    d.blockers.forEach((t) => { const li = document.createElement("li"); li.textContent = t; b.appendChild(li); });
+    bg.classList.remove("hidden");
+  } else bg.classList.add("hidden");
+
   const m = $("matched"); m.innerHTML = "";
   (d.matchedTerms || []).forEach((t) => m.appendChild(chip(t)));
   if (!d.matchedTerms?.length) m.appendChild(chip("none yet"));
