@@ -6,12 +6,41 @@
  * Claude Code auth — no key in .env needed). Runs headless print mode with
  * JSON output. Returns null on any failure so callers fall back to heuristics.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir } from "node:os";
 import path from "node:path";
 
 const pExecFile = promisify(execFile);
+
+/**
+ * Run `claude -p` with the prompt piped on STDIN (the reliable path for large
+ * prompts). Async execFile's `input` option is silently ignored — only spawn
+ * actually writes stdin — so we spawn and feed stdin manually. Resolves to raw
+ * stdout, or null on spawn error / timeout / non-zero exit.
+ */
+function runClaude(bin: string, prompt: string, timeoutMs: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(bin, ["-p", "--output-format", "json"], { stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    let settled = false;
+    const done = (v: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      done(null);
+    }, timeoutMs);
+    child.stdout.on("data", (d) => (out += d.toString()));
+    child.on("error", () => done(null));
+    child.on("close", (code) => done(code === 0 ? out : null));
+    child.stdin.on("error", () => {}); // ignore EPIPE if the CLI exits early
+    child.stdin.end(prompt);
+  });
+}
 
 let resolved = false;
 let binPath: string | null = null;
@@ -56,17 +85,10 @@ export async function cliAvailable(): Promise<boolean> {
 export async function extractViaCli(prompt: string): Promise<unknown | null> {
   const bin = await resolveCli();
   if (!bin) return null;
+  const stdout = await runClaude(bin, prompt, 180_000);
+  if (!stdout) return null;
   try {
-    // Pass the prompt on STDIN, not as an argv arg. A large prompt as an argument
-    // makes `claude -p` wait on (empty) stdin and get killed ("no stdin data
-    // received"), and can blow the arg-length limit. Piping via stdin is the
-    // documented print-mode path and is reliable for large prompts.
-    const { stdout } = await pExecFile(
-      bin,
-      ["-p", "--output-format", "json"],
-      { input: prompt, timeout: 180_000, maxBuffer: 10 * 1024 * 1024 }
-    );
-    // Print-mode JSON wrapper: { type, result, ... }. result holds the text.
+    // Print-mode JSON wrapper: { type, result, ... }. result holds the model text.
     let text = stdout;
     try {
       const wrapper = JSON.parse(stdout);
@@ -78,7 +100,7 @@ export async function extractViaCli(prompt: string): Promise<unknown | null> {
     if (!match) return null;
     return JSON.parse(match[0]);
   } catch (err) {
-    console.error("[cli] extractViaCli failed:", err);
+    console.error("[cli] extractViaCli parse failed:", err);
     return null;
   }
 }

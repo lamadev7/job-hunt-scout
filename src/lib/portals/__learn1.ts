@@ -9,7 +9,7 @@ const name = "gh-gitlab";
     { onStatus:m=>{ if(/Learning|Testing learned/.test(m))learned=true; if(/generic mode/.test(m))blind=true; }, onJob:()=>{n++;} });
   const r = await prisma.portalRecipe.findUnique({ where:{portal:name} });
   console.log(`FIRST-RUN: jobs=${n} attemptedLearn=${learned} fellToBlind=${blind} recipeSaved=${!!r}`);
-  if(r) console.log(`  regex=${r.jobLinkRegex} | conf=${r.confidence}`);
+  if(r) console.log(`  regex=${r.jobLinkRegex} | searchTpl=${r.searchUrlTemplate||"(base)"} | conf=${r.confidence}`);
   const jobs = await prisma.job.findMany({ where:{portal:name}, select:{id:true} });
   await prisma.application.deleteMany({ where:{jobId:{in:jobs.map(j=>j.id)}} });
   await prisma.job.deleteMany({ where:{portal:name} }); await prisma.portalRecipe.deleteMany({ where:{portal:name} }); await prisma.portal.deleteMany({ where:{name} });
