@@ -31,6 +31,9 @@ const MAX_LINKS = 25;
 const MIN_JD = 200; // a real JD is long; shorter == we grabbed nav/boilerplate
 const MAX_ROUNDS = 3;
 
+const DEBUG = Boolean(process.env.LEARN_DEBUG);
+const dbg = (...a: unknown[]) => DEBUG && console.error("[learn]", ...a);
+
 type PageProfile = {
   url: string;
   anchors: { href: string; text: string }[];
@@ -184,14 +187,18 @@ export async function learnRecipe(
     const snap = await profilePage(page).catch(() => null);
     if (!snap || (snap.anchors.length === 0 && snap.clickables.length === 0)) {
       feedback = "The base page exposed no links or controls (it may require sign-in).";
+      dbg(`round ${round}: empty page at ${page.url()}`);
       continue;
     }
+    dbg(`round ${round}: at ${snap.url} — ${snap.anchors.length} links, ${snap.inputs.length} inputs, ${snap.clickables.length} clickables`);
 
     const draft = await askForDraft(buildPrompt(portal, baseUrl, query, snap, round, feedback));
     if (!draft) {
       feedback = "Your previous reply was missing/invalid JSON. Return exactly the JSON object.";
+      dbg(`round ${round}: no valid draft from LLM`);
       continue;
     }
+    dbg(`round ${round}: draft steps=`, JSON.stringify(draft.steps), `regex=/${draft.jobLinkRegex}/`);
 
     // ---- execute the step script (lands us on the filtered feed) ----
     hooks?.onStatus?.(`Following ${draft.steps.length || 1} step(s) to the ${portal} feed…`);
@@ -205,6 +212,7 @@ export async function learnRecipe(
 
     // ---- validate: real job links on the page we ended up on ----
     const links = await probeLinks(page, draft.jobLinkRegex);
+    dbg(`round ${round}: after steps at ${page.url()} — regex matched ${links.length} link(s)`, links.slice(0, 3));
     if (!links.length) {
       const after = await profilePage(page).catch(() => null);
       feedback =
@@ -224,6 +232,7 @@ export async function learnRecipe(
       jd: draft.jdSelector,
       posted: draft.postedSelector,
     });
+    dbg(`round ${round}: sample ${links[0]} → jd ${detail.jd.length}ch, title="${detail.position.slice(0, 50)}"`);
     if (detail.jd.length < MIN_JD) {
       feedback =
         `jobLinkRegex matched links but the first one (${links[0]}) wasn't a real job page ` +
