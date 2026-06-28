@@ -16,7 +16,12 @@ import { chromium, type BrowserContext, type Page } from "playwright";
  * login challenge. Set PORTAL_HEADLESS=1 to hide it (not recommended).
  */
 
-const PROFILE_DIR = path.join(process.cwd(), ".browser-profile");
+// The persistent Chromium profile lives here. Overridable via PORTAL_PROFILE_DIR
+// so a test/recon run can point at its own logged-in session without colliding
+// with the app's profile (one user-data-dir can only be open in one process).
+const PROFILE_DIR = process.env.PORTAL_PROFILE_DIR?.trim()
+  ? path.resolve(process.env.PORTAL_PROFILE_DIR.trim())
+  : path.join(process.cwd(), ".browser-profile");
 
 const globalForBrowser = globalThis as unknown as {
   __portalContext?: BrowserContext;
@@ -38,6 +43,14 @@ async function launch(): Promise<BrowserContext> {
     globalForBrowser.__portalContext = undefined;
     globalForBrowser.__portalLaunch = undefined;
     globalForBrowser.__portalPages = undefined;
+  });
+  // Bundlers (esbuild/tsx with keepNames) wrap functions in a `__name(fn, ...)`
+  // helper. When such a function is shipped to page.evaluate the helper isn't
+  // defined in the browser → "ReferenceError: __name is not defined". Define a
+  // harmless identity shim on every document so any evaluated function runs.
+  await ctx.addInitScript(() => {
+    // @ts-expect-error — define the helper the bundler may reference in-page
+    if (typeof window.__name === "undefined") window.__name = (fn: unknown) => fn;
   });
   return ctx;
 }

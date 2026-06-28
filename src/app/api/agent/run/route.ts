@@ -7,6 +7,7 @@ export const maxDuration = 300; // real runs open a browser + wait for sign-in
 const schema = z.object({
   portals: z.array(z.string()).default([]),
   role: z.string().optional(),
+  roles: z.array(z.string()).max(6).optional(),
   threshold: z.number().min(0).max(100).default(90),
   postedWithin: z.enum(["24h", "2d", "7d", "30d", "custom"]).default("24h"),
   since: z.string().optional(), // ISO; used when postedWithin === "custom"

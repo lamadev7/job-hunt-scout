@@ -3,6 +3,7 @@ import type { JobRecord, SearchQuery } from "@/lib/portals/adapter";
 import { getAdapterFor } from "@/lib/portals/registry";
 import { ensureDefaultPortals } from "@/lib/portals/bootstrap";
 import { scoreJob } from "@/lib/matching/engine";
+import { judgeMatch } from "@/lib/matching/llm-judge";
 import { wordSuggestions } from "@/lib/llm/client";
 import { getActiveProfile, rowToStructured } from "@/lib/profile";
 import { getSettings } from "@/lib/settings";
@@ -12,7 +13,8 @@ export type PostedWindow = "24h" | "2d" | "7d" | "30d" | "custom";
 
 export type RunParams = {
   portals: string[];
-  role?: string;
+  role?: string; // single title (back-compat)
+  roles?: string[]; // multiple search titles; falls back to [role] / profile titles
   location?: string;
   remoteOnly?: boolean;
   threshold: number; // min matchPct to save (0..100)
@@ -64,6 +66,8 @@ export type AgentEvent =
 
 type Emit = (e: AgentEvent) => void;
 
+const DEBUG = Boolean(process.env.AGENT_DEBUG);
+
 /**
  * The agent loop (SHORTLIST mode — never applies):
  *  1. load the active structured profile
@@ -81,9 +85,17 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
   const profile = rowToStructured(profileRow);
   const settings = await getSettings();
 
-  const query: SearchQuery = {
+  // Which titles to search. Explicit roles win; else the single role; else the
+  // profile's saved recommendations; else one untitled (broad) pass.
+  const profileRoles = Array.isArray(profileRow.targetRoles) ? (profileRow.targetRoles as string[]) : [];
+  const roles = (params.roles?.length ? params.roles : params.role ? [params.role] : profileRoles)
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const searchRoles: (string | undefined)[] = roles.length ? roles.slice(0, 6) : [undefined];
+
+  const baseQuery: SearchQuery = {
     portals: params.portals,
-    role: params.role,
+    role: undefined,
     location: params.location,
     remoteOnly: true,
     since: resolveSince(params.postedWithin, params.since),
@@ -122,9 +134,34 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
     summary.evaluated += 1;
 
     const result = scoreJob(profile, job);
-    if (result.matchPct < params.threshold) {
+
+    // The deterministic engine is provable but LITERAL: it scores skill overlap
+    // and a years regex, but can't read "U.S. citizenship required" as a hard
+    // blocker or tell a required certification from merely using the tech. So a
+    // job whose skills all overlap can score 100% even when the candidate is
+    // disqualified. For jobs that PASS the bar, run the LLM judge on the full JD
+    // to catch those blockers and demote (the judge caps blocked jobs <=30).
+    // Judging only the high scorers — not every scanned job — keeps cost bounded.
+    // Judge every PLAUSIBLE candidate, not just ones already at the threshold —
+    // the deterministic score is a coarse pre-filter and can under-rate a strong
+    // fit (imperfect skill extraction), so anything reasonably close gets the
+    // precise LLM read, whose score becomes the final one. Clearly-irrelevant
+    // jobs (low coverage) are dropped cheaply without an LLM call.
+    const JUDGE_GATE = Math.min(params.threshold, 55);
+    let matchPct = result.matchPct;
+    let judgedPct: number | null = null;
+    if (matchPct >= JUDGE_GATE) {
+      const judged = await judgeMatch(profile, job.jd, job.position);
+      if (judged) {
+        judgedPct = judged.matchPct;
+        matchPct = judged.matchPct;
+      }
+    }
+    if (DEBUG) console.error(`[agent] det=${result.matchPct}% judge=${judgedPct ?? "-"}% final=${matchPct}% thr=${params.threshold} :: ${job.position.slice(0, 50)}`);
+
+    if (matchPct < params.threshold) {
       summary.skipped += 1;
-      emit({ type: "skip", position: job.position, matchPct: result.matchPct });
+      emit({ type: "skip", position: job.position, matchPct });
       return;
     }
     summary.matched += 1;
@@ -133,7 +170,7 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
     // every Easy-Apply match (it can auto-fill these), plus any perfect (100%)
     // match (external ones resolve to "external" at apply time so you open them
     // on the portal). The agent never submits during the scan.
-    const queued = settings.autoApplyEnabled && (job.easyApply || result.matchPct === 100);
+    const queued = settings.autoApplyEnabled && (job.easyApply || matchPct === 100);
 
     const suggestions = await wordSuggestions(result.missingTerms, job.position);
     await prisma.application.create({
@@ -141,7 +178,7 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
         jobId: job.id,
         profileId: profileRow.id,
         status: "matched", // saved to history, NOT applied
-        matchPct: result.matchPct,
+        matchPct,
         fitScore: result.fitScore,
         matchedTerms: result.matchedTerms,
         missingTerms: result.missingTerms,
@@ -150,14 +187,14 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
       },
     });
 
-    summary.topMatches.push({ company: job.company, position: job.position, matchPct: result.matchPct });
+    summary.topMatches.push({ company: job.company, position: job.position, matchPct });
     emit({
       type: "match",
       match: {
         company: job.company,
         position: job.position,
         postedAt: job.postedAt,
-        matchPct: result.matchPct,
+        matchPct,
         url: job.url,
       },
     });
@@ -173,17 +210,23 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
   const labelOf = (n: string) => portalRows.find((p) => p.name === n)?.label ?? n;
 
   // Scan every selected portal at the same time, each scoped to its own portal
-  // so results are correctly tagged. A failing portal records an error but never
-  // aborts the others.
+  // so results are correctly tagged. Within a portal, search each title in turn
+  // (the recipe's {role} is re-substituted per title); the `seen` set in onJob
+  // dedupes jobs surfaced by more than one title. A failing portal/title records
+  // an error but never aborts the others.
   await Promise.all(
     portalNames.map(async (name) => {
-      emit({ type: "status", message: `Scanning ${labelOf(name)}…` });
-      try {
-        await getAdapterFor(name).fetchJobs({ ...query, portals: [name] }, hooks);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "fetch failed";
-        summary.errors.push(`${labelOf(name)}: ${msg}`);
-        emit({ type: "error", message: `${labelOf(name)}: ${msg}` });
+      const adapter = getAdapterFor(name);
+      for (const role of searchRoles) {
+        const label = role ? `${labelOf(name)} — "${role}"` : labelOf(name);
+        emit({ type: "status", message: `Scanning ${label}…` });
+        try {
+          await adapter.fetchJobs({ ...baseQuery, role, portals: [name] }, hooks);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "fetch failed";
+          summary.errors.push(`${label}: ${msg}`);
+          emit({ type: "error", message: `${label}: ${msg}` });
+        }
       }
     })
   );

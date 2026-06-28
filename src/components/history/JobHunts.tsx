@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Trash2, Loader2, Rocket, ExternalLink, CheckCircle2, UserCog, XCircle } from "lucide-react";
 import { getJSON, sendJSON, type ApplicationItem, type ProfileResponse } from "@/lib/api";
@@ -95,6 +95,42 @@ export function JobHunts() {
   const hasProfile = !!profileData?.profile;
   const targetRole = profileData?.profile?.targetRole ?? "";
 
+  // Resizable left panel (lg screens). Width persisted; drag the divider handle.
+  const [asideW, setAsideW] = useState(420);
+  const [isLg, setIsLg] = useState(false);
+  const dragging = useRef(false);
+  useEffect(() => {
+    const saved = Number(localStorage.getItem("jobhunts.asideW"));
+    if (saved >= 300 && saved <= 760) setAsideW(saved);
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setIsLg(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("jobhunts.asideW", String(asideW));
+  }, [asideW]);
+  function startDrag(e: React.MouseEvent) {
+    e.preventDefault();
+    dragging.current = true;
+    const startX = e.clientX;
+    const startW = asideW;
+    const move = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      setAsideW(Math.min(760, Math.max(300, startW + (ev.clientX - startX))));
+    };
+    const up = () => {
+      dragging.current = false;
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    document.body.style.userSelect = "none";
+  }
+
   const qs = (
     queueMode
       ? new URLSearchParams({ applyState: "queued", ...(debounced && { q: debounced }) })
@@ -122,11 +158,26 @@ export function JobHunts() {
         }
       />
 
-      <div className="flex h-[calc(100dvh-12rem)] flex-col gap-5 lg:flex-row">
-        {/* ---- left: the agent form ---- */}
-        <aside className="w-full shrink-0 overflow-y-auto pr-1 lg:w-[420px]">
+      <div className="flex h-[calc(100dvh-12rem)] flex-col gap-3 lg:flex-row lg:gap-0">
+        {/* ---- left: the agent form (resizable on lg) ---- */}
+        <aside
+          className="w-full shrink-0 overflow-y-auto pr-1"
+          style={isLg ? { width: asideW } : undefined}
+        >
           <AgentRunPanel key={targetRole || "no-role"} hasProfile={hasProfile} defaultRole={targetRole} />
         </aside>
+
+        {/* drag handle: thin visible line with a wide invisible grab zone (lg only) */}
+        <div
+          onMouseDown={startDrag}
+          className="relative mx-2 hidden w-1 shrink-0 cursor-col-resize rounded-full bg-border transition-colors hover:bg-brand/60 active:bg-brand lg:block"
+          title="Drag to resize"
+          role="separator"
+          aria-orientation="vertical"
+        >
+          {/* widen the clickable area to ~20px without affecting layout */}
+          <span className="absolute inset-y-0 -left-2.5 -right-2.5" />
+        </div>
 
         {/* ---- right: search + chip filter on top, results below ---- */}
         <section className="flex min-w-0 flex-1 flex-col">

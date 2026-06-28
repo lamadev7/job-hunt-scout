@@ -17,7 +17,8 @@ model Profile {
   isActive        Boolean       @default(true)
   fullName        String        @default("")
   title           String        @default("")
-  targetRole      String        @default("") // evaluated default search role (set on upload)
+  targetRole      String        @default("") // top recommended role (back-compat / default)
+  targetRoles     Json          @default("[]") // string[] — recommended + user-added search titles
   email           String        @default("")
   phone           String        @default("")
   summary         String        @default("")
@@ -119,6 +120,42 @@ model Milestone {
   done        Boolean   @default(false)
   completedAt DateTime?
   createdAt   DateTime  @default(now())
+}
+
+/// A LEARNED scraping recipe for a portal that has no hand-tuned adapter.
+/// The agent discovers this once (LLM + live DOM), validates it, and replays it
+/// on later runs — so new portals need no hardcoded code. Self-heals: a recipe
+/// that stops returning jobs is marked `failed` and re-learned on the next run.
+model PortalRecipe {
+  id                String   @id @default(cuid())
+  portal            String   @unique // matches Portal.name
+  // Ordered navigation+filter action script that drives the browser FROM the
+  // portal's base url TO the filtered job-results feed. Each step is one of:
+  //   {action:"goto",   url}              navigate (url may hold {role}/{location}/{sinceDays}/{remote})
+  //   {action:"fill",   selector, value}  type into a search/filter box (value templated)
+  //   {action:"click",  selector}         click a nav link / filter chip / submit
+  //   {action:"select", selector, value}  choose a <select> option
+  //   {action:"press",  selector, key}    keypress (e.g. "Enter" to submit search)
+  //   {action:"waitFor",selector?, ms?}   let the results settle
+  // Empty => fall back to searchUrlTemplate (a single implicit goto). This is the
+  // "remembered steps" replayed on every later run so we never re-learn.
+  steps             Json     @default("[]")
+  // Legacy single-URL path (still honored when `steps` is empty). Placeholders:
+  // {role} {location} {sinceDays} {remote}. null/empty => just load the base url.
+  searchUrlTemplate String   @default("")
+  // Regex (JS source, case-insensitive) matched against each absolute anchor
+  // href to pick job-listing links on the results page.
+  jobLinkRegex      String
+  // CSS selectors for the detail page. "" => fall back to heuristic for that field.
+  titleSelector     String   @default("")
+  companySelector   String   @default("")
+  jdSelector        String   @default("")
+  postedSelector    String   @default("")
+  confidence        Float    @default(0) // 0..1 (validated on a sample job)
+  status            String   @default("active") // active | failed
+  sampleJobUrl      String   @default("")
+  learnedAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 /// Singleton app configuration (auto-apply settings).

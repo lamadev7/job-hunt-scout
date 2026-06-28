@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { extractedProfileSchema, type ExtractedProfile } from "@/lib/schemas/profile";
 import { parseResume } from "@/lib/parse/resume";
-import { extractViaCli, cliAvailable } from "@/lib/llm/cli";
+import { extractViaCli, cliAvailable, firstJsonValue } from "@/lib/llm/cli";
 import type { StructuredProfile } from "@/lib/types";
 
 const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
@@ -183,6 +183,34 @@ function finalize(
     confidence,
     source,
   };
+}
+
+/**
+ * Generic "return JSON" call used by the portal-recipe learner. Same two-tier
+ * strategy as extraction (Anthropic API, then local Claude CLI). Returns the
+ * first parsed JSON value, or null if no LLM is available / it produced nothing
+ * parseable. Never throws.
+ */
+export async function askJson(prompt: string, maxTokens = 1500): Promise<unknown | null> {
+  if (client) {
+    try {
+      const res = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }],
+      });
+      const textBlock = res.content.find((b) => b.type === "text");
+      if (textBlock && textBlock.type === "text") {
+        const v = firstJsonValue(textBlock.text);
+        if (v !== null) return v;
+      }
+    } catch (err) {
+      console.error("[llm] askJson API failed, trying CLI:", err);
+    }
+  }
+  // Tier 2 — local Claude CLI (extractViaCli already extracts the first JSON object).
+  return extractViaCli(prompt);
 }
 
 /**

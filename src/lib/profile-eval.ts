@@ -41,55 +41,80 @@ function score(terms: string[], haystack: string): number {
   return terms.reduce((n, term) => (haystack.includes(term) ? n + 1 : n), 0);
 }
 
-export function evaluateTargetRole(p: Pick<
-  StructuredProfile,
-  "title" | "yearsExperience" | "skills" | "tools" | "roles"
->): string {
-  // Weight role titles (working experience) and the current title heavier than
-  // raw skills, then fold in skills/tools (major experience + projects).
-  const titleText = [
-    ...(p.roles ?? []).map((r) => r.title),
-    p.title,
-    p.title, // double-weight current title
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+/** Which family terms actually appeared (for human-readable reasons). */
+function matchedTerms(terms: string[], haystack: string): string[] {
+  return terms.filter((t) => haystack.includes(t));
+}
+
+type ProfileForEval = Pick<StructuredProfile, "title" | "yearsExperience" | "skills" | "tools" | "roles">;
+
+function haystacks(p: ProfileForEval) {
+  const titleText = [...(p.roles ?? []).map((r) => r.title), p.title, p.title]
+    .filter(Boolean).join(" ").toLowerCase();
   const skillText = [...(p.skills ?? []), ...(p.tools ?? [])].join(" ").toLowerCase();
+  return { titleText, skillText };
+}
 
-  const scores = {} as Record<string, number>;
+/** Per-family weighted scores (title matches count double). Shared by the single
+ *  target-role pick and the multi-role recommender so they stay consistent. */
+function familyScores(p: ProfileForEval): Record<string, { score: number; terms: string[] }> {
+  const { titleText, skillText } = haystacks(p);
+  const out: Record<string, { score: number; terms: string[] }> = {};
   for (const s of SIGNALS) {
-    // title matches count double
-    scores[s.family] = score(s.terms, skillText) + 2 * score(s.terms, titleText);
+    out[s.family] = {
+      score: score(s.terms, skillText) + 2 * score(s.terms, titleText),
+      terms: [...new Set([...matchedTerms(s.terms, skillText), ...matchedTerms(s.terms, titleText)])],
+    };
   }
+  return out;
+}
 
-  const fe = scores.Frontend ?? 0;
-  const be = scores.Backend ?? 0;
-  const devops = scores.DevOps ?? 0;
-  const data = scores.Data ?? 0;
-  const mobile = scores.Mobile ?? 0;
+export type RecommendedRole = { title: string; family: Family; score: number; reason: string };
 
-  let family: Family;
-  const ranked = ([
-    ["Frontend", fe],
-    ["Backend", be],
-    ["DevOps", devops],
-    ["Data", data],
-    ["Mobile", mobile],
-  ] as [Family, number][]).sort((a, b) => b[1] - a[1]);
-
-  const [topFamily, topScore] = ranked[0];
-
-  if (topScore === 0) {
-    // Nothing recognized — keep the resume's own title if sensible, else generic.
-    const t = (p.title ?? "").trim();
-    return t || "Software Engineer";
-  } else if (fe >= 2 && be >= 2) {
-    family = "Full Stack";
-  } else {
-    family = topFamily;
-  }
-
+/**
+ * Recommend a RANKED list of suitable job titles from the profile — deterministic
+ * (no LLM): family signal strength + a Full-Stack pick when both front and back
+ * are strong, seniority-banded by years. Each carries a templated reason naming
+ * the stack that drove it; an LLM can rewrite these reasons later for nicer UX.
+ */
+export function recommendRoles(p: ProfileForEval, max = 5): RecommendedRole[] {
+  const fam = familyScores(p);
   const band = seniorityBand(p.yearsExperience ?? 0);
-  return `${band} ${ROLE_LABEL[family]}`.trim();
+  const label = (f: Family) => `${band} ${ROLE_LABEL[f]}`.trim();
+  const reasonFor = (terms: string[]) =>
+    terms.length ? `Matches your ${terms.slice(0, 4).join(", ")}` : "Based on your overall profile";
+
+  const out: RecommendedRole[] = [];
+  const fe = fam.Frontend?.score ?? 0;
+  const be = fam.Backend?.score ?? 0;
+
+  // Full Stack first when both sides are genuinely present.
+  if (fe >= 2 && be >= 2) {
+    out.push({
+      title: label("Full Stack"),
+      family: "Full Stack",
+      score: fe + be,
+      reason: reasonFor([...(fam.Frontend?.terms ?? []).slice(0, 2), ...(fam.Backend?.terms ?? []).slice(0, 2)]),
+    });
+  }
+  // Then each individual family with real signal, ranked by score.
+  const ranked = (Object.keys(fam) as Family[])
+    .map((f) => ({ f, ...fam[f] }))
+    .filter((x) => x.score >= 2)
+    .sort((a, b) => b.score - a.score);
+  for (const { f, score: sc, terms } of ranked) {
+    if (out.some((r) => r.family === f)) continue;
+    out.push({ title: label(f), family: f, score: sc, reason: reasonFor(terms) });
+  }
+  // Always offer a safe generic fallback so the list is never empty.
+  if (!out.length) {
+    const t = (p.title ?? "").trim() || ROLE_LABEL.Software;
+    out.push({ title: t, family: "Software", score: 0, reason: "A broad default from your profile" });
+  }
+  return out.slice(0, max);
+}
+
+/** The single best target role — the top recommendation (kept for back-compat). */
+export function evaluateTargetRole(p: ProfileForEval): string {
+  return recommendRoles(p, 1)[0]?.title || (p.title ?? "").trim() || ROLE_LABEL.Software;
 }

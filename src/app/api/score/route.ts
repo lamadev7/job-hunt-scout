@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getActiveProfile, rowToStructured } from "@/lib/profile";
 import { extractJobSkills } from "@/lib/matching/jd";
 import { scoreJob } from "@/lib/matching/engine";
+import { judgeMatch } from "@/lib/matching/llm-judge";
 import { wordSuggestions } from "@/lib/llm/client";
 
 export const runtime = "nodejs";
@@ -48,6 +49,33 @@ export async function POST(req: Request) {
   const { jd, position } = parsed.data;
   const { required, nice } = extractJobSkills(jd);
 
+  // PRIMARY: an LLM judge reads the whole JD vs the whole profile — it catches
+  // hard blockers (citizenship/clearance, min-years, required certs/degree) and
+  // tells a certification apart from a skill. FALLBACK: the deterministic engine
+  // when no LLM is available, so scoring always works.
+  const judged = await judgeMatch(profile, jd, position);
+  if (judged) {
+    const suggestions = await wordSuggestions(judged.missingSkills, position || "this role");
+    return NextResponse.json(
+      {
+        matchPct: judged.matchPct,
+        fitScore: judged.matchPct,
+        matchedTerms: judged.matchedSkills,
+        missingTerms: judged.missingSkills,
+        blockers: judged.blockers,
+        verdict: judged.verdict,
+        reasoning: judged.reasoning,
+        experience: null,
+        requiredSkills: required,
+        niceSkills: nice,
+        suggestions,
+        scoredBy: "llm",
+        profile: { fullName: profile.fullName, title: profile.title },
+      },
+      { headers: CORS }
+    );
+  }
+
   const result = scoreJob(profile, {
     requiredSkills: required,
     niceSkills: nice,
@@ -63,10 +91,12 @@ export async function POST(req: Request) {
       fitScore: result.fitScore,
       matchedTerms: result.matchedTerms,
       missingTerms: result.missingTerms,
+      blockers: [] as string[],
       experience: result.experience,
       requiredSkills: required,
       niceSkills: nice,
       suggestions,
+      scoredBy: "deterministic",
       profile: { fullName: profile.fullName, title: profile.title },
     },
     { headers: CORS }

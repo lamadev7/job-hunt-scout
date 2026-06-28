@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { Sparkles, Loader2, CheckCircle2, Briefcase, LogIn, AlertTriangle, MapPin, ExternalLink } from "lucide-react";
+import { Sparkles, Loader2, CheckCircle2, Briefcase, LogIn, AlertTriangle, MapPin, ExternalLink, X } from "lucide-react";
 import { Card, Button } from "@/components/ui/primitives";
 import { toast } from "@/components/ui/toast";
 import { getJSON, sendJSON, type PortalRow } from "@/lib/api";
@@ -52,9 +52,34 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
   const portals = (data?.portals ?? []).filter((p) => p.enabled);
 
   const [selected, setSelected] = useState<string[]>([]);
-  // Seeded from the resume-evaluated target role (panel is keyed on it upstream,
-  // so a changed evaluation remounts and re-seeds). User can still override.
-  const [role, setRole] = useState(defaultRole ?? "");
+
+  // Recommended search titles (from the profile) + the user's chosen set. The
+  // agent searches EACH chosen title and dedupes — "Full Stack" isn't the only
+  // way to describe this person; Frontend / Backend / Mobile may fit too.
+  const { data: rolesData } = useQuery({
+    queryKey: ["profile-roles"],
+    queryFn: () => getJSON<{ recommended: { title: string; family: string; reason: string }[]; selected: string[] }>("/api/profile/roles"),
+    enabled: hasProfile,
+  });
+  const [titles, setTitles] = useState<string[]>(defaultRole ? [defaultRole] : []);
+  const [titleInput, setTitleInput] = useState("");
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current || !rolesData) return;
+    const seed = rolesData.selected?.length ? rolesData.selected : rolesData.recommended.map((r) => r.title);
+    if (seed.length) { setTitles(seed); seededRef.current = true; }
+  }, [rolesData]);
+
+  const addTitle = (t: string) => {
+    const v = t.trim();
+    if (!v) return;
+    setTitles((cur) => (cur.some((x) => x.toLowerCase() === v.toLowerCase()) ? cur : [...cur, v]));
+  };
+  const removeTitle = (t: string) => setTitles((cur) => cur.filter((x) => x !== t));
+  const recommendedToAdd = (rolesData?.recommended ?? []).filter(
+    (r) => !titles.some((t) => t.toLowerCase() === r.title.toLowerCase())
+  );
+
   const [threshold, setThreshold] = useState(90);
   const [postedWithin, setPostedWithin] = useState<PostedWindow>("24h");
   const [customDate, setCustomDate] = useState("");
@@ -87,7 +112,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
       } else if (s.errors.length > 0) {
         toast.error(s.errors[0]);
       } else {
-        toast.info("No jobs found to scan. Connect LinkedIn (or check your sign-in) and try again.");
+        toast.info("No jobs found to scan. Connect your portals (or check your sign-in) and try again.");
       }
       qc.invalidateQueries({ queryKey: ["analytics"] });
       qc.invalidateQueries({ queryKey: ["applications"] });
@@ -104,13 +129,15 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
     setMatches([]);
     skippedRef.current = 0;
     setStatus("Starting…");
+    // Remember the chosen titles for next time (fire-and-forget).
+    if (titles.length) sendJSON("/api/profile/roles", { roles: titles }).catch(() => {});
     try {
       const res = await fetch("/api/agent/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           portals: selected,
-          role: role || undefined,
+          roles: titles.length ? titles : undefined,
           threshold,
           postedWithin,
           since: postedWithin === "custom" && customDate ? new Date(customDate).toISOString() : undefined,
@@ -171,7 +198,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
           <button
             onClick={() => setSelected([])}
             className={cn(
-              "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
               allSelected ? "border-brand bg-brand text-white" : "border-border bg-surface text-ink-soft hover:bg-surface-2"
             )}
           >
@@ -184,7 +211,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
                 key={p.id}
                 onClick={() => togglePortal(p.name)}
                 className={cn(
-                  "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+                  "rounded-full border px-3 py-2 text-xs font-medium transition-colors",
                   on ? "border-brand bg-brand text-white" : "border-border bg-surface text-ink-soft hover:bg-surface-2"
                 )}
               >
@@ -195,34 +222,71 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <div>
-          <div className="mb-2 text-xs font-medium text-ink-soft">Target role (optional)</div>
-          <input
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            placeholder="e.g. Full Stack Engineer"
-            className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm"
-          />
-          {defaultRole && (
-            <p className="mt-1 text-[11px] text-ink-faint">Suggested from your resume — edit if needed.</p>
-          )}
+      <div className="mt-4">
+        <div className="mb-2 text-xs font-medium text-ink-soft">
+          Target roles <span className="text-ink-faint">(searches each; recommended from your résumé)</span>
         </div>
-        <div>
-          <div className="mb-2 flex items-center justify-between text-xs font-medium text-ink-soft">
-            <span>Match threshold (save above)</span>
-            <span className="text-brand">{threshold}%</span>
+        {/* chosen titles */}
+        <div className="flex flex-wrap gap-2">
+          {titles.map((t) => (
+            <span key={t} className="inline-flex items-center gap-1 rounded-full border border-brand bg-brand px-2 py-1 text-xs font-medium text-white">
+              {t}
+              <button onClick={() => removeTitle(t)} className="opacity-80 hover:opacity-100" title="Remove" aria-label={`Remove ${t}`}>
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+          {titles.length === 0 && <span className="text-xs text-ink-faint">Add at least one title (or it searches broadly).</span>}
+        </div>
+
+        {/* add custom */}
+        <div className="mt-2 flex gap-2">
+          <input
+            value={titleInput}
+            onChange={(e) => setTitleInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTitle(titleInput); setTitleInput(""); } }}
+            placeholder="Add a title, e.g. Backend Engineer"
+            className="h-9 flex-1 rounded-lg border border-border bg-surface px-3 text-sm"
+          />
+          <Button variant="outline" className="h-9 px-3 text-xs" onClick={() => { addTitle(titleInput); setTitleInput(""); }} disabled={!titleInput.trim()}>
+            Add
+          </Button>
+        </div>
+
+        {/* recommended to add */}
+        {recommendedToAdd.length > 0 && (
+          <div className="mt-2">
+            <div className="mb-1 text-[11px] font-medium text-ink-faint">Recommended for you</div>
+            <div className="flex flex-wrap gap-2">
+              {recommendedToAdd.map((r) => (
+                <button
+                  key={r.title}
+                  onClick={() => addTitle(r.title)}
+                  title={r.reason}
+                  className="rounded-full border border-dashed border-border bg-surface px-3 py-1 text-xs text-ink-soft transition-colors hover:border-brand hover:text-brand"
+                >
+                  + {r.title}
+                </button>
+              ))}
+            </div>
           </div>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={5}
-            value={threshold}
-            onChange={(e) => setThreshold(Number(e.target.value))}
-            className="w-full accent-[var(--color-brand)]"
-          />
+        )}
+      </div>
+
+      <div className="mt-4">
+        <div className="mb-2 flex items-center justify-between text-xs font-medium text-ink-soft">
+          <span>Match threshold (save above)</span>
+          <span className="text-brand">{threshold}%</span>
         </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={threshold}
+          onChange={(e) => setThreshold(Number(e.target.value))}
+          className="w-full accent-[var(--color-brand)]"
+        />
       </div>
 
       <div className="mt-4">
@@ -233,7 +297,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
               key={w.key}
               onClick={() => setPostedWithin(w.key)}
               className={cn(
-                "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
                 postedWithin === w.key ? "border-brand bg-brand text-white" : "border-border bg-surface text-ink-soft hover:bg-surface-2"
               )}
             >
@@ -366,19 +430,18 @@ function PortalGate({ name, label }: { name: string; label: string }) {
   }
 
   return (
-    <div className="mt-3 flex flex-col gap-2 rounded-xl border border-warn/30 bg-warn/5 p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-2 text-xs text-ink-soft">
-        <Briefcase size={15} className="text-brand" />
-        {label} runs in a real browser but isn’t connected yet. Open it once to sign in / pass any check.
+    <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-warn/30 bg-warn/5 px-3 py-2">
+      <div className="flex min-w-0 items-center gap-2 text-xs text-ink-soft">
+        <Briefcase size={14} className="shrink-0 text-brand" />
+        <span className="truncate"><b className="font-medium text-ink">{label}</b> — sign in once</span>
       </div>
-      <div className="flex shrink-0 gap-2">
-        <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => connect.mutate()} disabled={connect.isPending}>
-          {connect.isPending ? <Loader2 className="animate-spin" size={14} /> : <LogIn size={14} />}
+      <div className="flex shrink-0 gap-1.5">
+        <Button variant="outline" className="h-7 px-2 text-xs" onClick={() => connect.mutate()} disabled={connect.isPending} title={`Connect ${label}`}>
+          {connect.isPending ? <Loader2 className="animate-spin" size={13} /> : <LogIn size={13} />}
           Connect
         </Button>
-        <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => session.refetch()} disabled={session.isFetching}>
-          {session.isFetching ? <Loader2 className="animate-spin" size={14} /> : null}
-          Re-check
+        <Button variant="outline" className="h-7 w-7 px-0 text-xs" onClick={() => session.refetch()} disabled={session.isFetching} title="Re-check">
+          {session.isFetching ? <Loader2 className="animate-spin" size={13} /> : <span className="text-sm">↻</span>}
         </Button>
       </div>
     </div>

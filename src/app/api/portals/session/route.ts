@@ -15,7 +15,7 @@ export async function GET(req: Request) {
   if (!adapter) {
     return NextResponse.json({ portal, real: false, loggedIn: false });
   }
-  const real = isReal(portal); // gated on by REAL_PORTALS env
+  const real = isReal(); // every portal is browser-driven now
   let loggedIn = false;
   if (adapter.isLoggedIn) {
     try {
