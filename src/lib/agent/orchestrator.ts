@@ -65,6 +65,8 @@ export type AgentEvent =
 
 type Emit = (e: AgentEvent) => void;
 
+const DEBUG = Boolean(process.env.AGENT_DEBUG);
+
 /**
  * The agent loop (SHORTLIST mode — never applies):
  *  1. load the active structured profile
@@ -131,11 +133,22 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
     // disqualified. For jobs that PASS the bar, run the LLM judge on the full JD
     // to catch those blockers and demote (the judge caps blocked jobs <=30).
     // Judging only the high scorers — not every scanned job — keeps cost bounded.
+    // Judge every PLAUSIBLE candidate, not just ones already at the threshold —
+    // the deterministic score is a coarse pre-filter and can under-rate a strong
+    // fit (imperfect skill extraction), so anything reasonably close gets the
+    // precise LLM read, whose score becomes the final one. Clearly-irrelevant
+    // jobs (low coverage) are dropped cheaply without an LLM call.
+    const JUDGE_GATE = Math.min(params.threshold, 55);
     let matchPct = result.matchPct;
-    if (matchPct >= params.threshold) {
+    let judgedPct: number | null = null;
+    if (matchPct >= JUDGE_GATE) {
       const judged = await judgeMatch(profile, job.jd, job.position);
-      if (judged) matchPct = judged.matchPct;
+      if (judged) {
+        judgedPct = judged.matchPct;
+        matchPct = judged.matchPct;
+      }
     }
+    if (DEBUG) console.error(`[agent] det=${result.matchPct}% judge=${judgedPct ?? "-"}% final=${matchPct}% thr=${params.threshold} :: ${job.position.slice(0, 50)}`);
 
     if (matchPct < params.threshold) {
       summary.skipped += 1;

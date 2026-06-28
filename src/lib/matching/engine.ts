@@ -67,23 +67,43 @@ export function scoreJob(profile: StructuredProfile, job: JobLike): MatchResult 
   const reqCov = required.length ? reqMatched.length / required.length : null;
   const niceCov = nice.length ? niceMatched.length / nice.length : null;
 
+  // Overall coverage across ALL extracted skills (deduped). The required/nice
+  // split is heuristic and sometimes mislabels (e.g. tags "Machine Learning" as
+  // the sole required while the real stack lands under nice); overall coverage
+  // is a robust cushion so a candidate who matches most of the JD's tech isn't
+  // buried by one misclassified term.
+  const allCanon = new Set([...reqCanon, ...niceCanon].map((s) => s.c));
+  const matchedCanon = new Set([...reqMatched, ...niceMatched].map((s) => s.c));
+  const overallCov = allCanon.size ? matchedCanon.size / allCanon.size : null;
+
+  // Required-led score where nice-to-haves are a BONUS, never a penalty: meeting
+  // all the REQUIRED skills alone is already a strong match (~0.9), and matching
+  // nice-to-haves on top lifts it toward 1.0. (The old reqCov*0.8 + niceCov*0.2
+  // capped a perfect required match at 80% whenever nice-to-haves were absent.)
+  let reqLed: number | null = null;
+  if (reqCov !== null && niceCov !== null) reqLed = reqCov * 0.9 + niceCov * 0.1;
+  else if (reqCov !== null) reqLed = reqCov;
+  else if (niceCov !== null) reqLed = niceCov;
+
   let skillScore: number; // 0..1
-  if (reqCov !== null && niceCov !== null) skillScore = reqCov * 0.8 + niceCov * 0.2;
-  else if (reqCov !== null) skillScore = reqCov;
-  else if (niceCov !== null) skillScore = niceCov;
+  if (reqLed !== null && overallCov !== null) skillScore = Math.max(reqLed, overallCov * 0.9);
+  else if (reqLed !== null) skillScore = reqLed;
+  else if (overallCov !== null) skillScore = overallCov;
   else skillScore = 0;
 
   const mustHaveCoverage = reqCov ?? 0;
   const niceHaveCoverage = niceCov ?? 0;
 
-  // Experience fit folds into the headline match — a strong skill match for a
-  // role that wants years you don't have is NOT a 100% match. Tolerance-aware so
-  // a realistic stretch isn't punished.
+  // Experience fit tempers the headline match but must NOT annihilate a strong
+  // skill match — a years shortfall is a soft signal here (the LLM judge enforces
+  // hard minimum-years blockers precisely). Floor the multiplier so skills still
+  // show through; a real shortfall caps the score well under a 90% bar but not 0.
   const exp = experienceFit(profile.yearsExperience, job.yearsRequired);
   const yearsMatch = exp.fit;
+  const effectiveFit = 0.6 + 0.4 * exp.fit;
 
   // Match % = skill coverage tempered by experience fit. Zero skills => still 0.
-  const matchPct = clamp(Math.round(skillScore * exp.fit * 100));
+  const matchPct = clamp(Math.round(skillScore * effectiveFit * 100));
 
   // Fewer applicants -> higher odds. Normalize against a 600 ceiling.
   const applicantFactor = clamp(1 - job.applicantCount / 600, 0, 1);
