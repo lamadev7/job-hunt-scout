@@ -41,7 +41,7 @@ Job Apply Scout automates the search and makes the matching **provable**:
 | Validation | Zod |
 | Charts | Recharts |
 
-> Portals with a registered adapter (LinkedIn, Indeed) run in a real browser automatically — **no environment variables required**. Any other portal you add falls back to mock demo data.
+> **Every portal runs in a real browser** — no environment variables required. Any portal you add is driven by a self-learning adapter that figures out its job-feed route + filters on the first run and replays them after. LinkedIn/Indeed add tuned apply/scrape on top.
 
 ---
 
@@ -107,7 +107,7 @@ Open <http://localhost:3000>.
 Go to **My Details** → drag in a PDF. The app parses it into a structured profile (skills, tools, experience with dates and bullets, education). Review the extracted fields, correct anything, and **Save & confirm** so the agent matches against accurate data.
 
 ### 2. Set up portals
-On **My Details**, manage the job portals you want to target. LinkedIn and Indeed run in a real browser; any other portal you add uses mock demo data.
+On **My Details**, manage the job portals you want to target. Every portal runs in a real browser; a portal with no tuned adapter is driven by the self-learning generic adapter (it learns the feed route + filters on the first run).
 
 ### 3. Connect a real portal (first run only)
 In the **Run the Agent** panel, each real portal shows a **Connect** button. Click it to open the headed browser, sign in (and clear any verification/CAPTCHA), then click **Re-check**. The session is remembered for future runs.
@@ -115,7 +115,7 @@ In the **Run the Agent** panel, each real portal shows a **Connect** button. Cli
 ### 4. Run the agent
 In the same panel:
 - Pick **portals** (or *All*).
-- Optionally set a **target role** (pre-filled from your resume).
+- Pick one or more **target roles** — pre-filled with titles recommended from your résumé (Full Stack, Frontend, Backend…); add your own. The agent searches each and dedupes.
 - Choose **Posted within**: 24 hours, 2 days, 7 days, 30 days, or a custom date.
 - Set the **match threshold** — only jobs at/above it are saved.
 - Click **Run Agent**. Selected portals are scanned at the same time, each in its own browser tab; matches stream in live.
