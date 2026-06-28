@@ -206,7 +206,11 @@ export async function learnRecipe(
       dbg(`round ${round}: empty page at ${page.url()}`);
       continue;
     }
-    dbg(`round ${round}: at ${snap.url} — ${snap.anchors.length} links, ${snap.inputs.length} inputs, ${snap.clickables.length} clickables`);
+    // The board's EFFECTIVE site after any redirect (some boards bounce
+    // job-boards.greenhouse.io → company.com/careers). Steps may move within this
+    // site freely; leaving it means a stray off-board click.
+    const boardSite = siteOf(snap.url);
+    dbg(`round ${round}: at ${snap.url} (site ${boardSite}) — ${snap.anchors.length} links, ${snap.inputs.length} inputs, ${snap.clickables.length} clickables`);
 
     const draft = await askForDraft(buildPrompt(portal, baseUrl, query, snap, round, feedback));
     if (!draft) {
@@ -230,10 +234,10 @@ export async function learnRecipe(
     // A stray click that jumps to a marketing/careers site (e.g. greenhouse board
     // → figma.com/careers) yields an UNFILTERED list, silently defeating the
     // profile filter. Reject and refine rather than save a filter-less recipe.
-    if (siteOf(page.url()) !== siteOf(baseUrl)) {
+    if (siteOf(page.url()) !== boardSite) {
       feedback =
-        `Your steps navigated OFF the portal to "${page.url()}" (a different site than ${baseUrl}). ` +
-        `Stay on the portal's own job board and apply filters THERE — fill its search box and press Enter, ` +
+        `Your steps navigated OFF the job board to "${page.url()}" (a different site than ${snap.url}). ` +
+        `Stay on the board and apply filters THERE — fill its search box and press Enter, ` +
         `or use its real query params. Never click links that leave the site.`;
       dbg(`round ${round}: wandered off-site to ${page.url()}`);
       continue;
