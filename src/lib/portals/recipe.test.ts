@@ -6,10 +6,13 @@ import assert from "node:assert/strict";
 import {
   buildSearchUrl,
   coerceRecipeDraft,
+  coerceRecipeDraftWithSteps,
   isValidRegex,
   jobLinkMatcher,
   sinceDays,
+  substitute,
 } from "./recipe";
+import { firstJsonValue } from "@/lib/llm/cli";
 import type { SearchQuery } from "./adapter";
 
 let passed = 0;
@@ -93,6 +96,66 @@ test("jobLinkMatcher: case-insensitive, matches detail links only", () => {
   const re = jobLinkMatcher({ jobLinkRegex: "/jobs/view/\\d+" });
   assert.equal(re.test("https://X.com/JOBS/VIEW/12345"), true);
   assert.equal(re.test("https://x.com/jobs/search?q=eng"), false);
+});
+
+test("substitute: fills url placeholders (encoded) from query", () => {
+  const out = substitute("https://x.com/jobs?term={role}&loc={location}&d={sinceDays}&r={remote}", q({ role: "Staff Engineer", remoteOnly: true, since: new Date(Date.now() - 3 * DAY).toISOString() }), true);
+  assert.match(out, /term=Staff%20Engineer/);
+  assert.match(out, /loc=Remote/); // remoteOnly defaults location to Remote
+  assert.match(out, /r=1/);
+  assert.match(out, /d=[34]/); // ceil(3 days), tolerant of timing
+});
+
+test("substitute: fill values are NOT url-encoded (typed raw into inputs)", () => {
+  assert.equal(substitute("{role}", q({ role: "C++ Dev" }), false), "C++ Dev");
+  assert.equal(substitute("{role}", q({ role: "C++ Dev" }), true), "C%2B%2B%20Dev");
+});
+
+test("coerceRecipeDraftWithSteps: keeps valid steps, drops malformed ones", () => {
+  const d = coerceRecipeDraftWithSteps({
+    jobLinkRegex: "/jobs/\\d+",
+    steps: [
+      { action: "goto", url: "https://x.com/jobs?q={role}" },
+      { action: "fill", selector: "#kw", value: "{role}" },
+      { action: "bogus", foo: 1 }, // dropped
+      { action: "click" }, // missing selector — dropped
+      { action: "press", key: "Enter" },
+    ],
+  });
+  assert.ok(d);
+  assert.equal(d!.steps.length, 3); // goto, fill, press survive
+  assert.equal(d!.steps[0].action, "goto");
+});
+
+test("coerceRecipeDraftWithSteps: still requires a compilable regex", () => {
+  assert.equal(coerceRecipeDraftWithSteps({ jobLinkRegex: "(", steps: [] }), null);
+  assert.equal(coerceRecipeDraftWithSteps({ steps: [] }), null); // missing regex
+});
+
+test("coerceRecipeDraftWithSteps: empty steps is allowed (legacy template path)", () => {
+  const d = coerceRecipeDraftWithSteps({ jobLinkRegex: "/jobs/\\d+", searchUrlTemplate: "https://x.com?q={role}" });
+  assert.ok(d);
+  assert.equal(d!.steps.length, 0);
+});
+
+test("firstJsonValue: extracts the object even with trailing prose", () => {
+  const v = firstJsonValue('Here is the recipe:\n{"matchPct": 42, "blockers": []}\nThat caps it at <=30.') as Record<string, unknown>;
+  assert.equal(v.matchPct, 42);
+});
+
+test("firstJsonValue: ignores braces inside strings", () => {
+  const v = firstJsonValue('{"note": "use {role} here", "n": 1}') as Record<string, unknown>;
+  assert.equal(v.n, 1);
+  assert.equal(v.note, "use {role} here");
+});
+
+test("firstJsonValue: skips a leading non-JSON brace-ish token, finds the real object", () => {
+  const v = firstJsonValue("not json { oops } then {\"ok\": true}") as Record<string, unknown>;
+  assert.equal(v.ok, true);
+});
+
+test("firstJsonValue: returns null when nothing parses", () => {
+  assert.equal(firstJsonValue("no json here at all"), null);
 });
 
 console.log(`\n${passed} passed`);
