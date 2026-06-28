@@ -1,26 +1,45 @@
 import type { Page } from "playwright";
 import { askJson, aiExtractionAvailable } from "@/lib/llm/client";
 import type { FetchHooks, SearchQuery } from "./adapter";
-import { buildSearchUrl, coerceRecipeDraft, type Recipe } from "./recipe";
+import { coerceRecipeDraftWithSteps, sinceDays, substitute, type Recipe, type RecipeDraft } from "./recipe";
 import { saveRecipe } from "./recipe-store";
+import { replaySteps } from "./steps";
 import { harvestJobLinks, scrapeDetail } from "./scrape";
 
 /**
- * Recipe LEARNER. For a portal with no hand-tuned adapter, we open the live site,
- * profile its results page, ask the LLM to infer a scraping recipe, then VALIDATE
- * that recipe on a real job before saving it. Validation is the safety net — we
- * never persist a recipe we couldn't actually use, so replay is trustworthy.
+ * Recipe LEARNER. For a portal with no hand-tuned adapter, the agent opens the
+ * live site and works out, on its own, HOW to reach a filtered job feed and read
+ * it — then saves that as a replayable step script (see steps.ts) so later runs
+ * never re-learn.
+ *
+ * The hard part real portals pose: the URL the user adds is often a HOMEPAGE or
+ * marketing/careers landing, NOT the job-results list. So the learner is agentic
+ * and iterative:
+ *   round 1  profile the landing → ask the LLM for a navigation+filter STEP SCRIPT
+ *            (click "Find Jobs", fill the search with the candidate's role, choose
+ *            Remote / a recency filter) plus a job-link regex + detail selectors.
+ *   execute  run the steps in the browser to land on the (now filtered) feed.
+ *   validate harvest job links + confirm the first one yields a real JD.
+ *   round 2+ if validation fails, RE-profile wherever we ended up (often the feed
+ *            itself, where the real job-detail links are finally visible) and ask
+ *            the LLM to correct the steps/regex. Converges in a couple of rounds.
+ * We never persist a recipe we couldn't actually use end-to-end, so replay stays
+ * trustworthy.
  */
 
 const MAX_LINKS = 25;
 const MIN_JD = 200; // a real JD is long; shorter == we grabbed nav/boilerplate
+const MAX_ROUNDS = 3;
 
-/** Compact, LLM-friendly snapshot of the results page (links + filter inputs). */
-async function profileResultsPage(page: Page): Promise<{
+type PageProfile = {
   url: string;
   anchors: { href: string; text: string }[];
   inputs: { name: string; id: string; placeholder: string; type: string; label: string }[];
-}> {
+  clickables: { text: string; tag: string; id: string; aria: string }[];
+};
+
+/** Compact, LLM-friendly snapshot: links, filter inputs, and clickable controls. */
+async function profilePage(page: Page): Promise<PageProfile> {
   return page.evaluate(() => {
     const seen = new Set<string>();
     const anchors: { href: string; text: string }[] = [];
@@ -28,10 +47,10 @@ async function profileResultsPage(page: Page): Promise<{
       const href = (a as HTMLAnchorElement).href;
       if (!href || seen.has(href)) continue;
       seen.add(href);
-      anchors.push({ href, text: ((a as HTMLElement).innerText || "").trim().slice(0, 80) });
-      if (anchors.length >= 60) break;
+      anchors.push({ href, text: ((a as HTMLElement).innerText || "").trim().slice(0, 60) });
+      if (anchors.length >= 80) break;
     }
-    const inputs = Array.from(document.querySelectorAll("input, select")).slice(0, 25).map((el) => {
+    const inputs = Array.from(document.querySelectorAll("input, select")).slice(0, 30).map((el) => {
       const i = el as HTMLInputElement;
       return {
         name: i.getAttribute("name") || "",
@@ -41,45 +60,107 @@ async function profileResultsPage(page: Page): Promise<{
         label: i.getAttribute("aria-label") || "",
       };
     });
-    return { url: location.href, anchors, inputs };
+    // Clickable controls (nav links, filter chips, "Find Jobs" buttons) — the
+    // things the agent may need to click to reach/filter the feed.
+    const clickables: { text: string; tag: string; id: string; aria: string }[] = [];
+    const cseen = new Set<string>();
+    for (const el of Array.from(document.querySelectorAll("button, a, [role='button'], [role='tab']"))) {
+      const text = ((el as HTMLElement).innerText || "").trim().slice(0, 40);
+      const aria = el.getAttribute("aria-label") || "";
+      const key = (text || aria).toLowerCase();
+      if (!key || cseen.has(key)) continue;
+      // Keep controls that read like navigation/filters — drop generic noise.
+      if (!/job|career|position|opening|browse|find|search|remote|filter|date|recent|posted|category|role|apply|view/i.test(key)) continue;
+      cseen.add(key);
+      clickables.push({ text, tag: el.tagName.toLowerCase(), id: el.getAttribute("id") || "", aria });
+      if (clickables.length >= 30) break;
+    }
+    return { url: location.href, anchors, inputs, clickables };
   });
+}
+
+/** Did harvesting the current page with `regex` find real job-detail links? */
+async function probeLinks(page: Page, regex: string): Promise<string[]> {
+  return harvestJobLinks(page, regex, MAX_LINKS, 4);
 }
 
 function buildPrompt(
   portal: string,
   baseUrl: string,
-  profile: Awaited<ReturnType<typeof profileResultsPage>>
+  query: SearchQuery,
+  snap: PageProfile,
+  round: number,
+  feedback: string
 ): string {
+  const filters = {
+    role: query.role || "(any software role)",
+    remote: query.remoteOnly ? "remote only" : "any location",
+    location: query.location || (query.remoteOnly ? "Remote" : ""),
+    postedWithinDays: sinceDays(query.since),
+  };
   return [
-    `You are configuring an automated scraper for the job board "${portal}" (${baseUrl}).`,
-    `I navigated to its listing page and captured the links and search inputs below.`,
-    `Infer a REUSABLE scraping recipe and return it as a single JSON object — no prose, no code fences.`,
+    `You are configuring an automated job scraper for the board "${portal}" (${baseUrl}).`,
+    `GOAL: produce a reusable STEP SCRIPT that, run in a browser starting from the base url`,
+    `(already loaded), navigates to the JOB-RESULTS FEED and applies the candidate's filters,`,
+    `plus a regex to pick job-detail links and CSS selectors to read a job page.`,
     ``,
-    `JSON shape (all keys required; use "" when unknown):`,
+    `The candidate's desired filters (apply whatever the site supports):`,
+    JSON.stringify(filters),
+    `Use the placeholders {role} {location} {sinceDays} {remote} inside step urls/values so the`,
+    `same script re-applies the right filters on future searches.`,
+    ``,
+    `Return ONE JSON object — no prose, no code fences:`,
     `{`,
-    `  "searchUrlTemplate": "absolute search URL with placeholders {role} {location} {sinceDays} {remote}, or \"\" to just use the base url",`,
-    `  "jobLinkRegex": "JS regex (no slashes/flags) matched against a job DETAIL link's full URL. Match the PATH only — do NOT include the domain/host (sites redirect to other hosts/CDNs), e.g. \\\\/jobs\\\\/\\\\d+ or \\\\/viewjob or \\\\/positions\\\\/\\\\d+",`,
+    `  "steps": [ ...ordered actions... ],`,
+    `  "jobLinkRegex": "JS regex (no slashes/flags) matched against a job DETAIL link's full URL — match the PATH only, never the domain, e.g. \\\\/remote-jobs\\\\/[^/]+ or \\\\/jobs\\\\/\\\\d+",`,
     `  "titleSelector": "CSS selector for the job title on a detail page, or \"\"",`,
-    `  "companySelector": "CSS selector for the company name, or \"\"",`,
+    `  "companySelector": "CSS selector for the company, or \"\"",`,
     `  "jdSelector": "CSS selector for the full job-description text, or \"\"",`,
-    `  "postedSelector": "CSS selector for the posted-date text, or \"\"",`,
+    `  "postedSelector": "CSS selector for the posted-date, or \"\"",`,
     `  "confidence": 0.0`,
     `}`,
     ``,
-    `Rules:`,
-    `- jobLinkRegex is the MOST important field: pick the PATH substring common to job detail links (look at the hrefs), generic enough to match all of them but not nav/category links. NEVER hardcode the domain — match only the path so it still works if the site redirects to a different host.`,
-    `- For searchUrlTemplate, use the search input "name" attributes to map params (e.g. keyword box name -> {role}). If unsure, return "".`,
-    `- Selectors: prefer stable ids/data-testid/semantic tags over hashed class names. If unsure, return "" (a heuristic fallback handles it).`,
+    `Each step is ONE of:`,
+    `  {"action":"goto","url":"absolute or site-relative url; may contain placeholders"}`,
+    `  {"action":"fill","selector":"<css>","value":"{role}"}        // type into a search/filter box`,
+    `  {"action":"click","selector":"<css or text=Label>"}          // nav link / filter chip / submit`,
+    `  {"action":"select","selector":"<css>","value":"..."}         // choose a <select> option`,
+    `  {"action":"press","selector":"<css or empty>","key":"Enter"} // submit a search box`,
+    `  {"action":"waitFor","selector":"<css>"}                      // optional: wait for results`,
     ``,
-    `LINKS: ${JSON.stringify(profile.anchors)}`,
-    `INPUTS: ${JSON.stringify(profile.inputs)}`,
+    `Rules:`,
+    `- If the current page is NOT a job-results list, the FIRST steps must get there: either a`,
+    `  goto a known results path (often "/jobs", "/remote-jobs", "/remote-jobs/search?term={role}")`,
+    `  or click a "Find Jobs"/"Remote jobs"/"Browse" link from the snapshot.`,
+    `- Prefer a single goto with query params when the site filters via URL (cheapest + most stable).`,
+    `  Map the search box's input "name" to {role}, location to {location}, recency to {sinceDays}.`,
+    `- For click/fill selectors prefer a stable id, name, data-testid, aria-label, or a Playwright`,
+    `  "text=Visible Label" selector. Avoid hashed class names.`,
+    `- jobLinkRegex is the MOST important field: the PATH substring common to job-detail links on the`,
+    `  RESULTS page, generic enough to match all of them but not nav/category links.`,
+    ``,
+    round > 0 ? `PREVIOUS ATTEMPT FEEDBACK (fix this): ${feedback}` : ``,
+    ``,
+    `CURRENT PAGE URL: ${snap.url}`,
+    `LINKS: ${JSON.stringify(snap.anchors)}`,
+    `SEARCH/FILTER INPUTS: ${JSON.stringify(snap.inputs)}`,
+    `CLICKABLE CONTROLS: ${JSON.stringify(snap.clickables)}`,
   ].join("\n");
+}
+
+/** Ask the LLM for a recipe draft, retrying a few times (cold CLI can return nothing). */
+async function askForDraft(prompt: string): Promise<RecipeDraft | null> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const draft = coerceRecipeDraftWithSteps(await askJson(prompt));
+    if (draft) return draft;
+  }
+  return null;
 }
 
 /**
  * Learn + validate a recipe for `portal`. Returns the saved recipe (+ the sample
- * job url it was validated on) or null if no LLM is available, the LLM produced
- * nothing usable, or validation failed. Caller falls back to blind heuristic.
+ * job url it validated on) or null if no LLM is available, the LLM produced
+ * nothing usable, or we could not reach a feed with real jobs in MAX_ROUNDS.
  */
 export async function learnRecipe(
   portal: string,
@@ -90,35 +171,51 @@ export async function learnRecipe(
 ): Promise<{ recipe: Recipe; sampleUrl: string } | null> {
   if (!(await aiExtractionAvailable())) return null;
 
-  hooks?.onStatus?.(`Learning how to read ${portal}…`);
-  await page.goto(baseUrl, { waitUntil: "commit", timeout: 45_000 }).catch(() => {});
-  await page.waitForTimeout(3000);
+  let feedback = "";
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    hooks?.onStatus?.(
+      round === 0 ? `Learning how to read ${portal}…` : `Refining ${portal} recipe (try ${round + 1})…`
+    );
 
-  const profile = await profileResultsPage(page).catch(() => null);
-  if (!profile || profile.anchors.length === 0) return null;
+    // Always start each attempt from the base url so the step script is anchored.
+    await page.goto(baseUrl, { waitUntil: "commit", timeout: 45_000 }).catch(() => {});
+    await page.waitForTimeout(2500);
 
-  // The LLM (esp. the CLI tier with no API key) can return nothing parseable on
-  // a cold first call; a few retries make learning reliable without real cost
-  // (learning happens once per portal, then the recipe is replayed from disk).
-  const prompt = buildPrompt(portal, baseUrl, profile);
-  let draft = null as ReturnType<typeof coerceRecipeDraft>;
-  for (let attempt = 0; attempt < 3 && !draft; attempt++) {
-    draft = coerceRecipeDraft(await askJson(prompt));
-  }
-  if (!draft) return null;
+    const snap = await profilePage(page).catch(() => null);
+    if (!snap || (snap.anchors.length === 0 && snap.clickables.length === 0)) {
+      feedback = "The base page exposed no links or controls (it may require sign-in).";
+      continue;
+    }
 
-  // ---- validate on a live sample (try the templated URL, then the base) ----
-  const candidates = [buildSearchUrl(draft.searchUrlTemplate, baseUrl, query)];
-  if (draft.searchUrlTemplate.trim()) candidates.push(baseUrl);
+    const draft = await askForDraft(buildPrompt(portal, baseUrl, query, snap, round, feedback));
+    if (!draft) {
+      feedback = "Your previous reply was missing/invalid JSON. Return exactly the JSON object.";
+      continue;
+    }
 
-  for (const searchUrl of candidates) {
-    hooks?.onStatus?.(`Testing learned recipe for ${portal}…`);
-    await page.goto(searchUrl, { waitUntil: "commit", timeout: 45_000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    // ---- execute the step script (lands us on the filtered feed) ----
+    hooks?.onStatus?.(`Following ${draft.steps.length || 1} step(s) to the ${portal} feed…`);
+    if (draft.steps.length) {
+      await replaySteps(page, draft.steps, baseUrl, query);
+    } else if (draft.searchUrlTemplate.trim()) {
+      // Legacy single-URL recipe — treat the template as one implicit goto.
+      await page.goto(substitute(draft.searchUrlTemplate, query, true), { waitUntil: "commit", timeout: 45_000 }).catch(() => {});
+      await page.waitForTimeout(2000);
+    }
 
-    const links = await harvestJobLinks(page, draft.jobLinkRegex, MAX_LINKS, 4);
-    if (!links.length) continue;
+    // ---- validate: real job links on the page we ended up on ----
+    const links = await probeLinks(page, draft.jobLinkRegex);
+    if (!links.length) {
+      const after = await profilePage(page).catch(() => null);
+      feedback =
+        `After your steps the browser is at "${page.url()}" but jobLinkRegex /${draft.jobLinkRegex}/ matched 0 of the ` +
+        `${after?.anchors.length ?? 0} links there. ` +
+        (after ? `The links now visible are: ${JSON.stringify(after.anchors.slice(0, 40))}. ` : "") +
+        `Either the steps didn't reach the job-results list, or the regex is wrong — fix whichever it is.`;
+      continue;
+    }
 
+    // Confirm the first link is a real, readable job (not a category/nav page).
     await page.goto(links[0], { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
     await page.waitForTimeout(900);
     const detail = await scrapeDetail(page, {
@@ -127,14 +224,18 @@ export async function learnRecipe(
       jd: draft.jdSelector,
       posted: draft.postedSelector,
     });
-    if (detail.jd.length < MIN_JD) continue;
+    if (detail.jd.length < MIN_JD) {
+      feedback =
+        `jobLinkRegex matched links but the first one (${links[0]}) wasn't a real job page ` +
+        `(only ${detail.jd.length} chars of description). Tighten the regex to job-DETAIL links only.`;
+      continue;
+    }
 
-    // Validated. If the template yielded nothing we'd have skipped it above, so
-    // persist whichever URL actually worked (empty template => base url).
-    if (searchUrl === baseUrl) draft.searchUrlTemplate = "";
+    // Validated end-to-end. Persist the step script + selectors for replay.
     const recipe = await saveRecipe(draft, portal, links[0]);
-    hooks?.onStatus?.(`Learned ${portal}. Scanning…`);
+    hooks?.onStatus?.(`Learned ${portal} (${draft.steps.length} step(s)). Scanning…`);
     return { recipe, sampleUrl: links[0] };
   }
+
   return null;
 }

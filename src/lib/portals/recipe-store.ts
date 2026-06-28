@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import type { Recipe, RecipeDraft } from "./recipe";
+import { stepSchema, type Recipe, type RecipeDraft, type Step } from "./recipe";
 
 /**
  * Persistence for learned portal recipes. Split from recipe.ts (pure logic) so
@@ -8,6 +8,7 @@ import type { Recipe, RecipeDraft } from "./recipe";
 
 type RecipeRow = {
   portal: string;
+  steps: unknown; // Prisma Json — validated back into Step[] on read
   searchUrlTemplate: string;
   jobLinkRegex: string;
   titleSelector: string;
@@ -18,9 +19,21 @@ type RecipeRow = {
   status: string;
 };
 
+/** Re-validate the stored JSON into a typed Step[], dropping anything malformed. */
+function parseSteps(raw: unknown): Step[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Step[] = [];
+  for (const s of raw) {
+    const parsed = stepSchema.safeParse(s);
+    if (parsed.success) out.push(parsed.data);
+  }
+  return out;
+}
+
 function rowToRecipe(r: RecipeRow): Recipe {
   return {
     portal: r.portal,
+    steps: parseSteps(r.steps),
     searchUrlTemplate: r.searchUrlTemplate,
     jobLinkRegex: r.jobLinkRegex,
     titleSelector: r.titleSelector,
@@ -42,6 +55,7 @@ export async function loadRecipe(portal: string): Promise<Recipe | null> {
 export async function saveRecipe(draft: RecipeDraft, portal: string, sampleJobUrl: string): Promise<Recipe> {
   const data = {
     portal,
+    steps: draft.steps,
     searchUrlTemplate: draft.searchUrlTemplate,
     jobLinkRegex: draft.jobLinkRegex,
     titleSelector: draft.titleSelector,

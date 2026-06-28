@@ -128,8 +128,19 @@ model Milestone {
 model PortalRecipe {
   id                String   @id @default(cuid())
   portal            String   @unique // matches Portal.name
-  // Search URL with placeholders: {role} {location} {sinceDays} {remote}.
-  // null/empty => just load the portal's base url (filter client-side).
+  // Ordered navigation+filter action script that drives the browser FROM the
+  // portal's base url TO the filtered job-results feed. Each step is one of:
+  //   {action:"goto",   url}              navigate (url may hold {role}/{location}/{sinceDays}/{remote})
+  //   {action:"fill",   selector, value}  type into a search/filter box (value templated)
+  //   {action:"click",  selector}         click a nav link / filter chip / submit
+  //   {action:"select", selector, value}  choose a <select> option
+  //   {action:"press",  selector, key}    keypress (e.g. "Enter" to submit search)
+  //   {action:"waitFor",selector?, ms?}   let the results settle
+  // Empty => fall back to searchUrlTemplate (a single implicit goto). This is the
+  // "remembered steps" replayed on every later run so we never re-learn.
+  steps             Json     @default("[]")
+  // Legacy single-URL path (still honored when `steps` is empty). Placeholders:
+  // {role} {location} {sinceDays} {remote}. null/empty => just load the base url.
   searchUrlTemplate String   @default("")
   // Regex (JS source, case-insensitive) matched against each absolute anchor
   // href to pick job-listing links on the results page.

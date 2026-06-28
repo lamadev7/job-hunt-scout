@@ -4,6 +4,7 @@ import { extractJobSkills } from "@/lib/matching/jd";
 import { getPage, isLaunched, screenshot } from "./browser";
 import { learnRecipe } from "./learn";
 import { buildSearchUrl, type Recipe } from "./recipe";
+import { replaySteps } from "./steps";
 import { loadRecipe, markRecipeFailed } from "./recipe-store";
 import { harvestJobLinks, scrapeDetail, type DetailSelectors } from "./scrape";
 import type { ApplyOutcome, FetchHooks, JobRecord, PortalAdapter, SearchQuery } from "./adapter";
@@ -149,7 +150,7 @@ export function makeGenericAdapter(name: string): PortalAdapter {
     };
   }
 
-  /** Open a results URL, harvest matching links, scrape + persist each job. */
+  /** Open a results URL, then harvest + scrape from it. */
   async function scan(
     page: Page,
     searchUrl: string,
@@ -162,7 +163,22 @@ export function makeGenericAdapter(name: string): PortalAdapter {
   ): Promise<JobRecord[]> {
     await page.goto(searchUrl, { waitUntil: "commit", timeout: 45_000 }).catch(() => {});
     await page.waitForTimeout(2000);
+    return scanCurrent(page, linkRegex, selectors, origin, query, hooks, exclude);
+  }
 
+  /**
+   * Harvest matching links from the page AS IT CURRENTLY IS (used after a step
+   * script has already navigated+filtered to the feed), then scrape + persist each.
+   */
+  async function scanCurrent(
+    page: Page,
+    linkRegex: string,
+    selectors: DetailSelectors,
+    origin: string,
+    query: SearchQuery,
+    hooks?: FetchHooks,
+    exclude?: RegExp
+  ): Promise<JobRecord[]> {
     const urls = await harvestJobLinks(page, linkRegex, MAX_JOBS, 8, exclude);
     if (!urls.length) return [];
 
@@ -201,8 +217,20 @@ export function makeGenericAdapter(name: string): PortalAdapter {
   }
 
   async function replay(page: Page, base: string, recipe: Recipe, query: SearchQuery, hooks?: FetchHooks) {
+    const sel = selectorsOf(recipe);
+    const origin = originOf(base);
+    // Preferred path: replay the remembered step script (route discovery + the
+    // profile-driven filters) deterministically, then scrape the feed it lands on.
+    if (recipe.steps.length) {
+      hooks?.onStatus?.(`Replaying ${recipe.steps.length} saved step(s) on ${name}…`);
+      await page.goto(base, { waitUntil: "commit", timeout: 45_000 }).catch(() => {});
+      await page.waitForTimeout(2000);
+      await replaySteps(page, recipe.steps, base, query);
+      return scanCurrent(page, recipe.jobLinkRegex, sel, origin, query, hooks);
+    }
+    // Legacy recipe: a single templated search URL.
     const searchUrl = buildSearchUrl(recipe.searchUrlTemplate, base, query);
-    return scan(page, searchUrl, recipe.jobLinkRegex, selectorsOf(recipe), originOf(base), query, hooks);
+    return scan(page, searchUrl, recipe.jobLinkRegex, sel, origin, query, hooks);
   }
 
   async function fetchJobs(query: SearchQuery, hooks?: FetchHooks): Promise<JobRecord[]> {
