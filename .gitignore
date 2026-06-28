@@ -51,4 +51,5 @@ next-env.d.ts
 
 # Playwright persistent login profile + apply screenshots
 .browser-profile/
+.li-recon-profile/
 public/uploads/screenshots/
