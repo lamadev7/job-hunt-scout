@@ -6,7 +6,7 @@ import { learnRecipe } from "./learn";
 import { buildSearchUrl, type Recipe } from "./recipe";
 import { replaySteps } from "./steps";
 import { loadRecipe, markRecipeFailed } from "./recipe-store";
-import { harvestJobLinks, looksLikeJob, scrapeDetail, type DetailSelectors } from "./scrape";
+import { harvestJobLinks, looksLikeJob, pageLooksLikeGate, scrapeDetail, type DetailSelectors } from "./scrape";
 import type { ApplyOutcome, FetchHooks, JobRecord, PortalAdapter, SearchQuery } from "./adapter";
 
 /**
@@ -274,6 +274,16 @@ export function makeGenericAdapter(name: string): PortalAdapter {
     const out = await scan(page, base, JOB_LINK_RE.source, NO_SELECTORS, origin, query, hooks, BLIND_EXCLUDE_RE);
     if (out.length) return out;
 
+    // Nothing found. Distinguish "you must sign in" (the common case for boards
+    // that gate their feed) from "we can't read this layout" so the message is
+    // actionable. Re-check the base page (blind scan left us elsewhere).
+    await page.goto(base, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    if (await pageLooksLikeGate(page)) {
+      throw new Error(
+        `${name} needs sign-in to show jobs. Click Connect, log in (and solve any check) in the opened window, then run again — your session is remembered.`
+      );
+    }
     throw new Error(
       `No jobs found on ${name}. Sign in / solve any check in the opened window, or the site's layout isn't auto-readable yet.`
     );

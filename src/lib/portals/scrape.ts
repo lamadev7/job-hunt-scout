@@ -74,6 +74,35 @@ export function looksLikeJob(d: Detail, minJd = 300): boolean {
 }
 
 /**
+ * Does the CURRENT page look like a sign-in / bot / marketing gate rather than
+ * browsable content? Used to give a precise "log in, then retry" message for
+ * login-walled boards (arc.dev, job-leads) instead of a vague "no jobs found".
+ * Signals: a gate phrase in title/heading, a password field, or a sign-in/sign-up
+ * form with very little other content.
+ */
+export async function pageLooksLikeGate(page: Page): Promise<boolean> {
+  return page
+    .evaluate((src) => {
+      const re = new RegExp(src, "i");
+      const title = document.title || "";
+      const h1 = (document.querySelector("h1, h2")?.textContent || "").trim();
+      const hasPassword = !!document.querySelector("input[type='password']");
+      const body = (document.body?.innerText || "").trim();
+      const authButton = Array.from(document.querySelectorAll("button, a, input[type='submit']")).some((b) =>
+        /\b(sign in|log in|login|sign up|create account|continue with)\b/i.test(
+          (b as HTMLElement).innerText || (b as HTMLInputElement).value || ""
+        )
+      );
+      if (re.test(title) || re.test(h1)) return true;
+      if (hasPassword) return true;
+      // An auth control with little real content => a gate, not a results page.
+      if (authButton && body.length < 1500) return true;
+      return false;
+    }, GATE_RE.source)
+    .catch(() => false);
+}
+
+/**
  * Scroll the results page, collecting absolute hrefs that match `regexSource`.
  * Stops at `max` links or `rounds` scrolls. Dedupes by canonical key (so the same
  * page linked under different #fragments isn't scraped repeatedly), preserves
