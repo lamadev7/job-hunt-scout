@@ -65,9 +65,16 @@ const JOB_SIGNALS = [
  * logged-out board (job-leads, arc.dev) from "learning" a bogus recipe off its
  * sign-in page.
  */
+// A search-results / category AGGREGATION page (not a single posting). Titles
+// like "99 Business Development jobs in Kathmandu", "Software Engineer Jobs",
+// "Jobs in London" — these list many jobs and must never be scored as one job.
+const AGG_TITLE_RE = /(\bjobs?\b\s+in\s+\w|^\s*\d[\d,]*\s+.+\bjobs?\b|\bjobs?\b\s*$|search results|^jobs\b)/i;
+
 export function looksLikeJob(d: Detail, minJd = 300): boolean {
   if (!d.jd || d.jd.length < minJd) return false;
   if (GATE_RE.test(d.position) || GATE_RE.test(d.jd.slice(0, 400))) return false;
+  // Reject aggregation/listing pages by their tell-tale title shape.
+  if (AGG_TITLE_RE.test(d.position.trim())) return false;
   const hay = `${d.position}\n${d.jd}`;
   const hits = JOB_SIGNALS.reduce((n, re) => n + (re.test(hay) ? 1 : 0), 0);
   return hits >= 2;
