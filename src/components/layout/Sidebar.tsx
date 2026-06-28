@@ -32,16 +32,26 @@ export function Sidebar() {
         collapsed ? "w-[76px]" : "w-64"
       )}
     >
-      <div className={cn("flex h-16 items-center gap-2.5 px-4", collapsed && "justify-center px-0")}>
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white">
-          <Bot size={20} />
-        </div>
+      <div className={cn("flex h-16 items-center px-3", collapsed ? "justify-center" : "justify-between gap-2")}>
         {!collapsed && (
-          <div className="leading-tight">
-            <div className="text-sm font-semibold">JobPilot</div>
-            <div className="text-[11px] text-ink-faint">Agentic job finder</div>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white">
+              <Bot size={20} />
+            </div>
+            <div className="leading-tight">
+              <div className="text-sm font-semibold">JobPilot</div>
+              <div className="text-[11px] text-ink-faint">Agentic job finder</div>
+            </div>
           </div>
         )}
+        <button
+          onClick={toggleSidebar}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-soft transition-colors hover:bg-surface-2 hover:text-ink"
+        >
+          {collapsed ? <PanelLeft size={18} /> : <PanelLeftClose size={18} />}
+        </button>
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3 py-2">
@@ -66,18 +76,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      <button
-        onClick={toggleSidebar}
-        className={cn(
-          "m-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-ink-soft transition-colors hover:bg-surface-2 hover:text-ink",
-          collapsed && "justify-center px-0"
-        )}
-        title={collapsed ? "Expand" : "Collapse"}
-      >
-        {collapsed ? <PanelLeft size={19} /> : <PanelLeftClose size={19} />}
-        {!collapsed && <span>Collapse</span>}
-      </button>
     </aside>
   );
 }

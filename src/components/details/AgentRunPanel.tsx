@@ -198,7 +198,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
           <button
             onClick={() => setSelected([])}
             className={cn(
-              "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
               allSelected ? "border-brand bg-brand text-white" : "border-border bg-surface text-ink-soft hover:bg-surface-2"
             )}
           >
@@ -211,7 +211,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
                 key={p.id}
                 onClick={() => togglePortal(p.name)}
                 className={cn(
-                  "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+                  "rounded-full border px-3 py-2 text-xs font-medium transition-colors",
                   on ? "border-brand bg-brand text-white" : "border-border bg-surface text-ink-soft hover:bg-surface-2"
                 )}
               >
@@ -229,10 +229,10 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
         {/* chosen titles */}
         <div className="flex flex-wrap gap-2">
           {titles.map((t) => (
-            <span key={t} className="inline-flex items-center gap-1 rounded-full border border-brand bg-brand px-3 py-1.5 text-sm font-medium text-white">
+            <span key={t} className="inline-flex items-center gap-1 rounded-full border border-brand bg-brand px-2 py-1 text-xs font-medium text-white">
               {t}
               <button onClick={() => removeTitle(t)} className="opacity-80 hover:opacity-100" title="Remove" aria-label={`Remove ${t}`}>
-                <X size={13} />
+                <X size={11} />
               </button>
             </span>
           ))}
@@ -263,7 +263,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
                   key={r.title}
                   onClick={() => addTitle(r.title)}
                   title={r.reason}
-                  className="rounded-full border border-dashed border-border bg-surface px-3 py-1.5 text-sm text-ink-soft transition-colors hover:border-brand hover:text-brand"
+                  className="rounded-full border border-dashed border-border bg-surface px-3 py-1 text-xs text-ink-soft transition-colors hover:border-brand hover:text-brand"
                 >
                   + {r.title}
                 </button>
@@ -297,7 +297,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
               key={w.key}
               onClick={() => setPostedWithin(w.key)}
               className={cn(
-                "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
                 postedWithin === w.key ? "border-brand bg-brand text-white" : "border-border bg-surface text-ink-soft hover:bg-surface-2"
               )}
             >
@@ -430,19 +430,18 @@ function PortalGate({ name, label }: { name: string; label: string }) {
   }
 
   return (
-    <div className="mt-3 flex flex-col gap-2 rounded-xl border border-warn/30 bg-warn/5 p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-2 text-xs text-ink-soft">
-        <Briefcase size={15} className="text-brand" />
-        {label} runs in a real browser but isn’t connected yet. Open it once to sign in / pass any check.
+    <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-warn/30 bg-warn/5 px-3 py-2">
+      <div className="flex min-w-0 items-center gap-2 text-xs text-ink-soft">
+        <Briefcase size={14} className="shrink-0 text-brand" />
+        <span className="truncate"><b className="font-medium text-ink">{label}</b> — sign in once</span>
       </div>
-      <div className="flex shrink-0 gap-2">
-        <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => connect.mutate()} disabled={connect.isPending}>
-          {connect.isPending ? <Loader2 className="animate-spin" size={14} /> : <LogIn size={14} />}
+      <div className="flex shrink-0 gap-1.5">
+        <Button variant="outline" className="h-7 px-2 text-xs" onClick={() => connect.mutate()} disabled={connect.isPending} title={`Connect ${label}`}>
+          {connect.isPending ? <Loader2 className="animate-spin" size={13} /> : <LogIn size={13} />}
           Connect
         </Button>
-        <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => session.refetch()} disabled={session.isFetching}>
-          {session.isFetching ? <Loader2 className="animate-spin" size={14} /> : null}
-          Re-check
+        <Button variant="outline" className="h-7 w-7 px-0 text-xs" onClick={() => session.refetch()} disabled={session.isFetching} title="Re-check">
+          {session.isFetching ? <Loader2 className="animate-spin" size={13} /> : <span className="text-sm">↻</span>}
         </Button>
       </div>
     </div>
