@@ -9,8 +9,9 @@ import { closeBrowser } from "@/lib/portals/browser";
 import { runAgent, type AgentEvent } from "@/lib/agent/orchestrator";
 
 const NAME = "gh-flow";
-const BASE = "https://job-boards.greenhouse.io/gitlab";
-const THRESHOLD = 25;
+const BASE = process.argv[2] || "https://job-boards.greenhouse.io/gitlab";
+const ROLE = process.argv[3] || "Software Engineer";
+const THRESHOLD = Number(process.argv[4] || 25);
 
 (async () => {
   // Clean slate for this test portal (leave the user's real portals + apps alone).
@@ -34,7 +35,7 @@ const THRESHOLD = 25;
   let summary;
   try {
     summary = await runAgent(
-      { portals: [NAME], role: "Software Engineer", threshold: THRESHOLD, postedWithin: "30d", remoteOnly: true },
+      { portals: [NAME], role: ROLE, threshold: THRESHOLD, postedWithin: "30d", remoteOnly: true },
       emit
     );
   } catch (err) {
