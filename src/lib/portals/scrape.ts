@@ -27,6 +27,52 @@ function canonicalKey(href: string): string {
   return href.replace(/#.*$/, "").replace(/\/+$/, "").toLowerCase();
 }
 
+/** Same as canonicalKey but ALSO drops the query string — so a job link is judged
+ *  distinct from the results page only by PATH, and "?a=1" vs "?a=2" of the same
+ *  results page both collapse to the feed itself. */
+function pathKey(href: string): string {
+  try {
+    const u = new URL(href);
+    return (u.origin + u.pathname).replace(/\/+$/, "").toLowerCase();
+  } catch {
+    return canonicalKey(href);
+  }
+}
+
+// A page that is a LOGIN/marketing gate, not a real job. We must never persist a
+// recipe (or a job) validated against one of these — that was the job-leads bug.
+const GATE_RE =
+  /(just a moment|checking your browser|verify(ing)? you are human|enable javascript|please (sign|log) ?in|create (a |an )?(free )?account|enhance your job search|unlock (your|more)|sign up to|register to (see|view|apply)|access denied|are you a robot)/i;
+
+// Signals that the body actually describes a job. A real JD has several of these.
+const JOB_SIGNALS = [
+  /responsibilit/i,
+  /requirement/i,
+  /qualificat/i,
+  /years? of experience/i,
+  /what you'?ll (do|be doing)/i,
+  /about (the|this) (role|team|position|job)/i,
+  /we(?:'re| are) looking for/i,
+  /(benefits|compensation|salary|perks)/i,
+  /(skills|proficien|expertise) (in|with)/i,
+  /(apply|application) (now|for this)/i,
+];
+
+/**
+ * Is the scraped page a REAL job detail page (not a login wall, marketing CTA, or
+ * bot interstitial)? Requires a substantial body, no gate phrasing in the title,
+ * and at least two distinct job-content signals. This is the gate that stops a
+ * logged-out board (job-leads, arc.dev) from "learning" a bogus recipe off its
+ * sign-in page.
+ */
+export function looksLikeJob(d: Detail, minJd = 300): boolean {
+  if (!d.jd || d.jd.length < minJd) return false;
+  if (GATE_RE.test(d.position) || GATE_RE.test(d.jd.slice(0, 400))) return false;
+  const hay = `${d.position}\n${d.jd}`;
+  const hits = JOB_SIGNALS.reduce((n, re) => n + (re.test(hay) ? 1 : 0), 0);
+  return hits >= 2;
+}
+
 /**
  * Scroll the results page, collecting absolute hrefs that match `regexSource`.
  * Stops at `max` links or `rounds` scrolls. Dedupes by canonical key (so the same
@@ -47,6 +93,10 @@ export async function harvestJobLinks(
   } catch {
     return [];
   }
+  // A job-DETAIL link must differ (by path) from the results page we're harvesting
+  // from — otherwise a self-referential listing link (e.g. "/us/jobs/l/Remote" on
+  // the page of the same url) gets mistaken for a job. This was the job-leads bug.
+  const selfPath = pathKey(page.url());
   const seen = new Set<string>();
   const out: string[] = [];
   for (let s = 0; s < rounds && out.length < max; s++) {
@@ -56,6 +106,7 @@ export async function harvestJobLinks(
     for (const h of hrefs) {
       if (!h || !re.test(h)) continue;
       if (exclude && exclude.test(h)) continue;
+      if (pathKey(h) === selfPath) continue; // skip the results page itself
       const key = canonicalKey(h);
       if (seen.has(key)) continue;
       seen.add(key);

@@ -4,7 +4,7 @@ import type { FetchHooks, SearchQuery } from "./adapter";
 import { coerceRecipeDraftWithSteps, sinceDays, substitute, type Recipe, type RecipeDraft } from "./recipe";
 import { saveRecipe } from "./recipe-store";
 import { replaySteps } from "./steps";
-import { harvestJobLinks, scrapeDetail } from "./scrape";
+import { harvestJobLinks, looksLikeJob, scrapeDetail } from "./scrape";
 
 /**
  * Recipe LEARNER. For a portal with no hand-tuned adapter, the agent opens the
@@ -232,11 +232,13 @@ export async function learnRecipe(
       jd: draft.jdSelector,
       posted: draft.postedSelector,
     });
-    dbg(`round ${round}: sample ${links[0]} → jd ${detail.jd.length}ch, title="${detail.position.slice(0, 50)}"`);
-    if (detail.jd.length < MIN_JD) {
+    dbg(`round ${round}: sample ${links[0]} → jd ${detail.jd.length}ch, title="${detail.position.slice(0, 50)}", job=${looksLikeJob(detail, MIN_JD)}`);
+    if (!looksLikeJob(detail, MIN_JD)) {
       feedback =
-        `jobLinkRegex matched links but the first one (${links[0]}) wasn't a real job page ` +
-        `(only ${detail.jd.length} chars of description). Tighten the regex to job-DETAIL links only.`;
+        `jobLinkRegex matched ${links[0]} but it is NOT a real job posting — it looks like a ` +
+        `sign-in/marketing gate or a listing page (title "${detail.position.slice(0, 60)}", ` +
+        `${detail.jd.length} chars, lacks job-description content). If the site needs sign-in the ` +
+        `jobs aren't visible; otherwise point jobLinkRegex at individual job-DETAIL links only.`;
       continue;
     }
 

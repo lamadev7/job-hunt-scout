@@ -6,7 +6,7 @@ import { learnRecipe } from "./learn";
 import { buildSearchUrl, type Recipe } from "./recipe";
 import { replaySteps } from "./steps";
 import { loadRecipe, markRecipeFailed } from "./recipe-store";
-import { harvestJobLinks, scrapeDetail, type DetailSelectors } from "./scrape";
+import { harvestJobLinks, looksLikeJob, scrapeDetail, type DetailSelectors } from "./scrape";
 import type { ApplyOutcome, FetchHooks, JobRecord, PortalAdapter, SearchQuery } from "./adapter";
 
 /**
@@ -191,7 +191,9 @@ export function makeGenericAdapter(name: string): PortalAdapter {
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
         await page.waitForTimeout(900);
         const d = await scrapeDetail(page, selectors);
-        if (!d.jd || d.jd.length < MIN_JD) continue;
+        // Only keep pages that are genuinely job postings — never a sign-in wall,
+        // marketing CTA, or the listing page itself dressed up as a job.
+        if (!looksLikeJob(d, MIN_JD)) continue;
         hooks?.onStatus?.(`Reading ${i}/${urls.length}: ${d.position || "job"}`);
 
         const postedAt = parsePosted(d.posted);

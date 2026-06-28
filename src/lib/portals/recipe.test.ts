@@ -13,6 +13,7 @@ import {
   substitute,
 } from "./recipe";
 import { firstJsonValue } from "@/lib/llm/cli";
+import { looksLikeJob } from "./scrape";
 import type { SearchQuery } from "./adapter";
 
 let passed = 0;
@@ -156,6 +157,29 @@ test("firstJsonValue: skips a leading non-JSON brace-ish token, finds the real o
 
 test("firstJsonValue: returns null when nothing parses", () => {
   assert.equal(firstJsonValue("no json here at all"), null);
+});
+
+const detail = (position: string, jd: string) => ({ position, jd, company: "", posted: "", easyApply: false });
+
+test("looksLikeJob: accepts a real posting with job-content signals", () => {
+  const jd = "About the role: we are looking for an engineer. Responsibilities include building APIs. " +
+    "Requirements: 5 years of experience with TypeScript. Benefits: health, equity.".repeat(3);
+  assert.equal(looksLikeJob(detail("Senior Software Engineer", jd), 200), true);
+});
+
+test("looksLikeJob: rejects a marketing/sign-in gate by title", () => {
+  const jd = "Create a free account to unlock more jobs and enhance your job search now. ".repeat(20);
+  assert.equal(looksLikeJob(detail("Enhance Your Job Search Now", jd), 200), false);
+});
+
+test("looksLikeJob: rejects a gate phrase even with a neutral title", () => {
+  const jd = "Please sign in to view this job. " + "x".repeat(500);
+  assert.equal(looksLikeJob(detail("Software Engineer", jd), 200), false);
+});
+
+test("looksLikeJob: rejects thin pages and pages lacking job signals", () => {
+  assert.equal(looksLikeJob(detail("Engineer", "too short"), 200), false);
+  assert.equal(looksLikeJob(detail("Engineer", "lorem ipsum ".repeat(80)), 200), false); // long but no signals
 });
 
 console.log(`\n${passed} passed`);
