@@ -87,6 +87,18 @@ async function probeLinks(page: Page, regex: string): Promise<string[]> {
   return harvestJobLinks(page, regex, MAX_LINKS, 4);
 }
 
+/** Registrable-domain (eTLD+1, approx) of a url — so subdomain redirects
+ *  (job-boards. → boards.greenhouse.io) are "same site" but figma.com is not. */
+function siteOf(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    const parts = host.split(".");
+    return parts.length <= 2 ? host : parts.slice(-2).join(".");
+  } catch {
+    return url;
+  }
+}
+
 function buildPrompt(
   portal: string,
   baseUrl: string,
@@ -132,11 +144,15 @@ function buildPrompt(
     `  {"action":"waitFor","selector":"<css>"}                      // optional: wait for results`,
     ``,
     `Rules:`,
+    `- STAY ON THIS SITE (${baseUrl}). Never click a link that leaves the portal's own job board`,
+    `  (e.g. a marketing "/careers" page on a different domain) — that returns an UNFILTERED list.`,
     `- If the current page is NOT a job-results list, the FIRST steps must get there: either a`,
     `  goto a known results path (often "/jobs", "/remote-jobs", "/remote-jobs/search?term={role}")`,
     `  or click a "Find Jobs"/"Remote jobs"/"Browse" link from the snapshot.`,
-    `- Prefer a single goto with query params when the site filters via URL (cheapest + most stable).`,
-    `  Map the search box's input "name" to {role}, location to {location}, recency to {sinceDays}.`,
+    `- To filter by role, PREFER filling the on-page search box (from INPUTS) with {role} and pressing`,
+    `  Enter — that is more reliable than guessing a URL query-param name. Only use a goto with params`,
+    `  if you are confident of the real param name (do NOT invent ones like "?t=" or "?q=" blindly).`,
+    `- Apply the filters EXACTLY ONCE; don't add clicks whose effect you're unsure of.`,
     `- For click/fill selectors prefer a stable id, name, data-testid, aria-label, or a Playwright`,
     `  "text=Visible Label" selector. Avoid hashed class names.`,
     `- jobLinkRegex is the MOST important field: the PATH substring common to job-detail links on the`,
@@ -208,6 +224,19 @@ export async function learnRecipe(
       // Legacy single-URL recipe — treat the template as one implicit goto.
       await page.goto(substitute(draft.searchUrlTemplate, query, true), { waitUntil: "commit", timeout: 45_000 }).catch(() => {});
       await page.waitForTimeout(2000);
+    }
+
+    // ---- guard: the steps must keep us ON the portal's own board ----
+    // A stray click that jumps to a marketing/careers site (e.g. greenhouse board
+    // → figma.com/careers) yields an UNFILTERED list, silently defeating the
+    // profile filter. Reject and refine rather than save a filter-less recipe.
+    if (siteOf(page.url()) !== siteOf(baseUrl)) {
+      feedback =
+        `Your steps navigated OFF the portal to "${page.url()}" (a different site than ${baseUrl}). ` +
+        `Stay on the portal's own job board and apply filters THERE — fill its search box and press Enter, ` +
+        `or use its real query params. Never click links that leave the site.`;
+      dbg(`round ${round}: wandered off-site to ${page.url()}`);
+      continue;
     }
 
     // ---- validate: real job links on the page we ended up on ----
