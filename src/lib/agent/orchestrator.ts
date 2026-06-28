@@ -13,7 +13,8 @@ export type PostedWindow = "24h" | "2d" | "7d" | "30d" | "custom";
 
 export type RunParams = {
   portals: string[];
-  role?: string;
+  role?: string; // single title (back-compat)
+  roles?: string[]; // multiple search titles; falls back to [role] / profile titles
   location?: string;
   remoteOnly?: boolean;
   threshold: number; // min matchPct to save (0..100)
@@ -84,9 +85,17 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
   const profile = rowToStructured(profileRow);
   const settings = await getSettings();
 
-  const query: SearchQuery = {
+  // Which titles to search. Explicit roles win; else the single role; else the
+  // profile's saved recommendations; else one untitled (broad) pass.
+  const profileRoles = Array.isArray(profileRow.targetRoles) ? (profileRow.targetRoles as string[]) : [];
+  const roles = (params.roles?.length ? params.roles : params.role ? [params.role] : profileRoles)
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const searchRoles: (string | undefined)[] = roles.length ? roles.slice(0, 6) : [undefined];
+
+  const baseQuery: SearchQuery = {
     portals: params.portals,
-    role: params.role,
+    role: undefined,
     location: params.location,
     remoteOnly: true,
     since: resolveSince(params.postedWithin, params.since),
@@ -201,17 +210,23 @@ export async function runAgent(params: RunParams, emit: Emit = () => {}): Promis
   const labelOf = (n: string) => portalRows.find((p) => p.name === n)?.label ?? n;
 
   // Scan every selected portal at the same time, each scoped to its own portal
-  // so results are correctly tagged. A failing portal records an error but never
-  // aborts the others.
+  // so results are correctly tagged. Within a portal, search each title in turn
+  // (the recipe's {role} is re-substituted per title); the `seen` set in onJob
+  // dedupes jobs surfaced by more than one title. A failing portal/title records
+  // an error but never aborts the others.
   await Promise.all(
     portalNames.map(async (name) => {
-      emit({ type: "status", message: `Scanning ${labelOf(name)}…` });
-      try {
-        await getAdapterFor(name).fetchJobs({ ...query, portals: [name] }, hooks);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "fetch failed";
-        summary.errors.push(`${labelOf(name)}: ${msg}`);
-        emit({ type: "error", message: `${labelOf(name)}: ${msg}` });
+      const adapter = getAdapterFor(name);
+      for (const role of searchRoles) {
+        const label = role ? `${labelOf(name)} — "${role}"` : labelOf(name);
+        emit({ type: "status", message: `Scanning ${label}…` });
+        try {
+          await adapter.fetchJobs({ ...baseQuery, role, portals: [name] }, hooks);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "fetch failed";
+          summary.errors.push(`${label}: ${msg}`);
+          emit({ type: "error", message: `${label}: ${msg}` });
+        }
       }
     })
   );

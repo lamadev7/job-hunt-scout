@@ -35,7 +35,7 @@ const THRESHOLD = Number(process.argv[4] || 25);
   let summary;
   try {
     summary = await runAgent(
-      { portals: [NAME], role: ROLE, threshold: THRESHOLD, postedWithin: "30d", remoteOnly: true },
+      { portals: [NAME], roles: ROLE.split(",").map((s) => s.trim()).filter(Boolean), threshold: THRESHOLD, postedWithin: "30d", remoteOnly: true },
       emit
     );
   } catch (err) {

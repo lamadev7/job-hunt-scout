@@ -5,7 +5,7 @@ import path from "node:path";
 import { prisma } from "@/lib/db";
 import { parsePdf } from "@/lib/pdf";
 import { extractProfile } from "@/lib/llm/client";
-import { evaluateTargetRole } from "@/lib/profile-eval";
+import { evaluateTargetRole, recommendRoles } from "@/lib/profile-eval";
 
 export const runtime = "nodejs";
 
@@ -64,8 +64,11 @@ export async function POST(req: Request) {
   const combinedText = saved.map((s) => s.text).join("\n\n").trim();
   const structured = await extractProfile(combinedText);
 
-  // Evaluate a default target role from the parsed resume (skills, roles, years).
-  const targetRole = evaluateTargetRole(structured);
+  // Recommend search titles from the parsed resume (skills, roles, years). The
+  // first is the default target role; all seed the editable multi-title list.
+  const recommended = recommendRoles(structured);
+  const targetRoles = recommended.map((r) => r.title);
+  const targetRole = targetRoles[0] ?? evaluateTargetRole(structured);
 
   // Deactivate previous profiles, create the new active one.
   await prisma.profile.updateMany({ data: { isActive: false }, where: { isActive: true } });
@@ -75,6 +78,7 @@ export async function POST(req: Request) {
       fullName: structured.fullName,
       title: structured.title,
       targetRole,
+      targetRoles,
       email: structured.email,
       phone: structured.phone,
       summary: structured.summary,

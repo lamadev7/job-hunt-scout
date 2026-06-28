@@ -17,7 +17,8 @@ model Profile {
   isActive        Boolean       @default(true)
   fullName        String        @default("")
   title           String        @default("")
-  targetRole      String        @default("") // evaluated default search role (set on upload)
+  targetRole      String        @default("") // top recommended role (back-compat / default)
+  targetRoles     Json          @default("[]") // string[] — recommended + user-added search titles
   email           String        @default("")
   phone           String        @default("")
   summary         String        @default("")
