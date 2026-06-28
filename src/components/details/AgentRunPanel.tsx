@@ -297,7 +297,7 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
               key={w.key}
               onClick={() => setPostedWithin(w.key)}
               className={cn(
-                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                "rounded-full border px-2 py-1 text-xs font-medium transition-colors",
                 postedWithin === w.key ? "border-brand bg-brand text-white" : "border-border bg-surface text-ink-soft hover:bg-surface-2"
               )}
             >
