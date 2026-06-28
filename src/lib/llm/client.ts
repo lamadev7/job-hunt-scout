@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { extractedProfileSchema, type ExtractedProfile } from "@/lib/schemas/profile";
 import { parseResume } from "@/lib/parse/resume";
-import { extractViaCli, cliAvailable } from "@/lib/llm/cli";
+import { extractViaCli, cliAvailable, firstJsonValue } from "@/lib/llm/cli";
 import type { StructuredProfile } from "@/lib/types";
 
 const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
@@ -202,8 +202,8 @@ export async function askJson(prompt: string, maxTokens = 1500): Promise<unknown
       });
       const textBlock = res.content.find((b) => b.type === "text");
       if (textBlock && textBlock.type === "text") {
-        const m = textBlock.text.match(/\{[\s\S]*\}/);
-        if (m) return JSON.parse(m[0]);
+        const v = firstJsonValue(textBlock.text);
+        if (v !== null) return v;
       }
     } catch (err) {
       console.error("[llm] askJson API failed, trying CLI:", err);

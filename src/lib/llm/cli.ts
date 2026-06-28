@@ -87,20 +87,53 @@ export async function extractViaCli(prompt: string): Promise<unknown | null> {
   if (!bin) return null;
   const stdout = await runClaude(bin, prompt, 180_000);
   if (!stdout) return null;
+  // Print-mode JSON wrapper: { type, result, ... }. result holds the model text.
+  let text = stdout;
   try {
-    // Print-mode JSON wrapper: { type, result, ... }. result holds the model text.
-    let text = stdout;
-    try {
-      const wrapper = JSON.parse(stdout);
-      if (wrapper && typeof wrapper.result === "string") text = wrapper.result;
-    } catch {
-      /* not wrapped — use raw stdout */
-    }
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    return JSON.parse(match[0]);
-  } catch (err) {
-    console.error("[cli] extractViaCli parse failed:", err);
-    return null;
+    const wrapper = JSON.parse(stdout);
+    if (wrapper && typeof wrapper.result === "string") text = wrapper.result;
+  } catch {
+    /* not wrapped — use raw stdout */
   }
+  return firstJsonValue(text);
+}
+
+/**
+ * Extract the first complete JSON object/array embedded in arbitrary model text.
+ * Brace/bracket matching is depth-aware and string-aware (ignores braces inside
+ * quotes), so a trailing sentence after the JSON — or a stray "}" in prose — no
+ * longer breaks parsing the way a greedy /\{[\s\S]*\}/ regex did. Returns null if
+ * no balanced JSON value parses.
+ */
+export function firstJsonValue(text: string): unknown | null {
+  for (let i = 0; i < text.length; i++) {
+    const open = text[i];
+    if (open !== "{" && open !== "[") continue;
+    const close = open === "{" ? "}" : "]";
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let j = i; j < text.length; j++) {
+      const c = text[j];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === "\\") esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === open) depth++;
+      else if (c === close) {
+        depth--;
+        if (depth === 0) {
+          try {
+            return JSON.parse(text.slice(i, j + 1));
+          } catch {
+            break; // not valid from this opener; try the next one
+          }
+        }
+      }
+    }
+  }
+  return null;
 }
