@@ -10,7 +10,7 @@ import { runAgent, type AgentEvent } from "@/lib/agent/orchestrator";
 
 const NAME = "gh-flow";
 const BASE = "https://job-boards.greenhouse.io/gitlab";
-const THRESHOLD = 50;
+const THRESHOLD = 25;
 
 (async () => {
   // Clean slate for this test portal (leave the user's real portals + apps alone).
