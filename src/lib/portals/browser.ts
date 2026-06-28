@@ -16,7 +16,12 @@ import { chromium, type BrowserContext, type Page } from "playwright";
  * login challenge. Set PORTAL_HEADLESS=1 to hide it (not recommended).
  */
 
-const PROFILE_DIR = path.join(process.cwd(), ".browser-profile");
+// The persistent Chromium profile lives here. Overridable via PORTAL_PROFILE_DIR
+// so a test/recon run can point at its own logged-in session without colliding
+// with the app's profile (one user-data-dir can only be open in one process).
+const PROFILE_DIR = process.env.PORTAL_PROFILE_DIR?.trim()
+  ? path.resolve(process.env.PORTAL_PROFILE_DIR.trim())
+  : path.join(process.cwd(), ".browser-profile");
 
 const globalForBrowser = globalThis as unknown as {
   __portalContext?: BrowserContext;
