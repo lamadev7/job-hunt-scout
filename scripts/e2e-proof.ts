@@ -7,7 +7,6 @@
 import { prisma } from "@/lib/db";
 import { getPage, screenshot, closeBrowser } from "@/lib/portals/browser";
 import { learnRecipe } from "@/lib/portals/learn";
-import { loadRecipe } from "@/lib/portals/recipe-store";
 import { replaySteps } from "@/lib/portals/steps";
 import { harvestJobLinks, scrapeDetail } from "@/lib/portals/scrape";
 import { extractJobSkills } from "@/lib/matching/jd";
@@ -20,7 +19,7 @@ const BASE = "https://job-boards.greenhouse.io/discord";
 const query: SearchQuery = { portals: [NAME], role: "Full Stack", remoteOnly: true, location: "Remote", since: new Date(Date.now() - 30 * 86_400_000).toISOString() };
 
 const shots: string[] = [];
-const snap = async (page: any, label: string) => { const s = await screenshot(page, label); shots.push(s); console.log(`  📸 ${label} -> ${s}`); };
+const snap = async (page: Awaited<ReturnType<typeof getPage>>, label: string) => { const s = await screenshot(page, label); shots.push(s); console.log(`  📸 ${label} -> ${s}`); };
 
 (async () => {
   const profRow = await getActiveProfile();
