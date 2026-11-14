@@ -101,7 +101,9 @@ export function JobHunts() {
   const dragging = useRef(false);
   useEffect(() => {
     const saved = Number(localStorage.getItem("jobhunts.asideW"));
-    if (saved >= 300 && saved <= 760) setAsideW(saved);
+    if (saved >= 300 && saved <= 760) {
+      requestAnimationFrame(() => setAsideW(saved));
+    }
     const mq = window.matchMedia("(min-width: 1024px)");
     const sync = () => setIsLg(mq.matches);
     sync();

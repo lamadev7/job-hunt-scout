@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { Sparkles, Loader2, CheckCircle2, Briefcase, LogIn, AlertTriangle, MapPin, ExternalLink, X } from "lucide-react";
@@ -64,11 +64,11 @@ export function AgentRunPanel({ hasProfile, defaultRole }: { hasProfile: boolean
   const [titles, setTitles] = useState<string[]>(defaultRole ? [defaultRole] : []);
   const [titleInput, setTitleInput] = useState("");
   const seededRef = useRef(false);
-  useEffect(() => {
-    if (seededRef.current || !rolesData) return;
+  // Seed titles from roles query once during render (avoids setState-in-effect).
+  if (!seededRef.current && rolesData) {
     const seed = rolesData.selected?.length ? rolesData.selected : rolesData.recommended.map((r) => r.title);
     if (seed.length) { setTitles(seed); seededRef.current = true; }
-  }, [rolesData]);
+  }
 
   const addTitle = (t: string) => {
     const v = t.trim();
