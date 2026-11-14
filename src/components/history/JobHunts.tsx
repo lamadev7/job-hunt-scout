@@ -96,19 +96,17 @@ export function JobHunts() {
   const targetRole = profileData?.profile?.targetRole ?? "";
 
   // Resizable left panel (lg screens). Width persisted; drag the divider handle.
-  const [asideW, setAsideW] = useState(() => {
-    if (typeof window === "undefined") return 420;
-    const saved = Number(localStorage.getItem("jobhunts.asideW"));
-    return saved >= 300 && saved <= 760 ? saved : 420;
-  });
-  const [isLg, setIsLg] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.matchMedia("(min-width: 1024px)").matches;
-  });
+  const [asideW, setAsideW] = useState(420);
+  const [isLg, setIsLg] = useState(false);
   const dragging = useRef(false);
   useEffect(() => {
+    const saved = Number(localStorage.getItem("jobhunts.asideW"));
+    if (saved >= 300 && saved <= 760) {
+      requestAnimationFrame(() => setAsideW(saved));
+    }
     const mq = window.matchMedia("(min-width: 1024px)");
     const sync = () => setIsLg(mq.matches);
+    sync();
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, []);
