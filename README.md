@@ -41,7 +41,7 @@ Job Apply Scout automates the search and makes the matching **provable**:
 | Validation | Zod |
 | Charts | Recharts |
 
-> Portals with a registered adapter (LinkedIn, Indeed) run in a real browser automatically — **no environment variables required**. Any other portal you add falls back to mock demo data.
+> Every portal runs in a real browser automatically — **no environment variables required**. LinkedIn and Indeed use hand-tuned adapters; any other portal you add uses the generic browser adapter, which learns the site's layout on its first run.
 
 ---
 
@@ -90,14 +90,17 @@ Open <http://localhost:3000>.
 | `pnpm db:studio` | Browse the database (Prisma Studio) |
 | `pnpm db:reset` | Clear personal data (profile, applications, milestones) — keeps the job pool |
 
-### Environment variables (all optional)
+### Environment variables
 
 | Variable | Purpose |
 |----------|---------|
+| `DATABASE_URL` | Prisma connection string. Defaults to `file:./dev.db` (local SQLite). |
 | `ANTHROPIC_API_KEY` | Use the Claude API for resume extraction. Empty = fall back to CLI, then heuristic. |
 | `ANTHROPIC_MODEL` | Claude model (default `claude-sonnet-4-6`). |
 | `CLAUDE_CLI_PATH` | Path to the `claude` CLI. Empty = auto-detect (PATH or `~/.claude/local/claude`). |
 | `PORTAL_HEADLESS` | `1` hides the automation browser (not recommended — you can't solve CAPTCHAs). |
+
+Only `DATABASE_URL` is required for the app to start; `.env.example` already sets it.
 
 ---
 
@@ -107,7 +110,7 @@ Open <http://localhost:3000>.
 Go to **My Details** → drag in a PDF. The app parses it into a structured profile (skills, tools, experience with dates and bullets, education). Review the extracted fields, correct anything, and **Save & confirm** so the agent matches against accurate data.
 
 ### 2. Set up portals
-On **My Details**, manage the job portals you want to target. LinkedIn and Indeed run in a real browser; any other portal you add uses mock demo data.
+On **My Details**, manage the job portals you want to target. Every portal runs in a real browser — LinkedIn and Indeed use tuned adapters; others use the generic browser adapter.
 
 ### 3. Connect a real portal (first run only)
 In the **Run the Agent** panel, each real portal shows a **Connect** button. Click it to open the headed browser, sign in (and clear any verification/CAPTCHA), then click **Re-check**. The session is remembered for future runs.
